@@ -1,0 +1,180 @@
+# autoRPA2 - Lotus Notes 自動化工具
+
+自動打卡與新聞稿擷取上傳工具，透過 Lotus Notes COM API 操作 Notes 資料庫，並支援將新聞稿上傳至 Joomla 4 網站。
+
+---
+
+## 系統需求
+
+| 項目 | 需求 |
+|---|---|
+| 作業系統 | Windows（僅限，依賴 COM API） |
+| Python | 3.x **32-bit**（配合 Lotus Notes 8.5.3 32-bit） |
+| Lotus Notes | 8.5.3，需在背景保持登入狀態 |
+| 虛擬環境 | `venv32`（32-bit Python） |
+
+---
+
+## 安裝
+
+```powershell
+# 建立 32-bit 虛擬環境（使用 32-bit Python 執行檔）
+& "C:\path\to\python32\python.exe" -m venv venv32
+
+# 安裝套件
+venv32\Scripts\pip.exe install pywin32 python-dotenv pillow requests
+```
+
+---
+
+## 環境設定（`.env`）
+
+在專案根目錄建立 `.env`：
+
+```
+NOTES_PASSWORD=你的Notes密碼
+
+JOOMLA_URL=https://你的網站網址/home
+JOOMLA_TOKEN=你的JoomlaAPIToken
+JOOMLA_CATEGORY_ID=8
+JOOMLA_MEDIA_FOLDER=images/01news
+```
+
+> `.env` 已列入 `.gitignore`，不會被 git 追蹤。
+
+---
+
+## 功能一：自動打卡（`auto_checkin.py`）
+
+連線至 `hmsign.nsf`，建立簽到退卡文件。
+
+```powershell
+# 簽到
+venv32\Scripts\python.exe auto_checkin.py in
+
+# 簽退
+venv32\Scripts\python.exe auto_checkin.py out
+```
+
+**設定區（`auto_checkin.py` 頂部）：**
+
+| 變數 | 說明 | 預設值 |
+|---|---|---|
+| `SERVER` | Domino 伺服器 | `hladmin2/medicine/Tzuchi` |
+| `DB_PATH` | 打卡資料庫路徑 | `moghuman\hmsign.nsf` |
+| `USER` | Notes 使用者名稱 | `曾建瑋/medicine/Tzuchi` |
+| `SIGN_TYPE` | 班別代碼 | `N`（正常班） |
+
+班別代碼：`N`=正常班　`A`=加班　`C`=OnCall　`S`=交接班
+
+**日誌：** `checkin.log`
+
+### Windows 工作排程器
+
+| 批次檔 | 用途 |
+|---|---|
+| `task_checkin_in.bat` | 排程簽到（建議設定 08:00） |
+| `task_checkin_out.bat` | 排程簽退（建議設定 17:00） |
+
+設定方式：工作排程器 → 建立基本工作 → 觸發程序選「每天」→ 動作選「啟動程式」→ 選擇對應 `.bat` 檔。
+
+---
+
+## 功能二：新聞稿擷取（`query_news.py`）
+
+連線至 `mddpdoc.nsf`，依日期區間下載新聞稿文字與內嵌圖片。
+
+```powershell
+venv32\Scripts\python.exe query_news.py
+```
+
+執行後輸入起訖日期：
+
+```
+起始日期 (YYYY/MM/DD): 2026/05/01
+結束日期 (YYYY/MM/DD): 2026/05/31
+```
+
+**輸出結構：**
+
+```
+output/
+├── checklist.json              ← 下載紀錄（防重複下載）
+├── 20260506_新聞標題/
+│   ├── content.txt             ← 文字內容
+│   ├── img_000.jpg
+│   └── img_001.jpg
+└── 20260513_另一篇新聞/
+    └── ...
+```
+
+**重複下載防護：**
+- 已下載的文章會記錄在 `output/checklist.json`
+- 再次執行同樣日期區間時，已下載的文章會自動跳過
+- 若要強制重新下載，刪除 `checklist.json` 中對應的 UNID 記錄即可
+
+---
+
+## 功能三：上傳至 Joomla（`upload_joomla.py`）
+
+將 `query_news.py` 下載的新聞稿上傳至 Joomla 4 網站，建立草稿文章。
+
+```powershell
+venv32\Scripts\python.exe upload_joomla.py
+```
+
+**前置條件（Joomla 後台）：**
+1. Extensions → Plugins → 啟用 `API Authentication - Web Services Joomla Token`
+2. Extensions → Plugins → 啟用 `Web Services - Content`
+3. Extensions → Plugins → 啟用 `Web Services - Media`
+4. Extensions → Plugins → 啟用 `System - Web Services`
+5. Users → 你的帳號 → Joomla API Token → 產生 Token 並填入 `.env`
+
+**圖片上傳路徑規則：**
+
+```
+images/01news/{年}/{月}/{月日}/{UNID前8碼}/img_000.jpg
+```
+
+範例：2026/05/13 的新聞稿（UNID 開頭 `BCE1730B`）：
+```
+images/01news/2026/05/0513/BCE1730B/img_000.jpg
+```
+
+**文章狀態：** 上傳後為**草稿（Unpublished）**，需至後台審核後手動發佈。
+
+---
+
+## 工具腳本
+
+| 檔案 | 說明 |
+|---|---|
+| `check_notes.py` | 列出 hmsign.nsf 所有 View（維護用） |
+| `inspect_news.py` | 列出 mddpdoc.nsf 的 View、Form 及第一筆欄位（維護用） |
+| `query_checkin.py` | 查詢指定日期區間的打卡紀錄 |
+
+---
+
+## 待辦事項
+
+### Joomla 上傳功能（進行中）
+
+- [ ] **安裝 `System - Web Services` 外掛**
+  - 原因：Joomla 後台找不到此核心外掛，導致 API 路由無法啟用（回傳 401）
+  - 解法：Extensions → Manage → Discover，或透過 FTP 上傳 `plugins/system/webservices/` 後重新 Discover 安裝
+- [ ] 完整測試上傳流程（圖片 + 文章）
+- [ ] 至 Joomla 後台確認草稿文章內容與圖片顯示正確
+- [ ] 審核草稿後手動發佈，確認前台顯示正常
+
+### 清理
+
+- [ ] 刪除 `test_image_extract.py`（開發期間的診斷腳本，已無用途）
+
+---
+
+## 注意事項
+
+- **Lotus Notes 必須保持登入狀態**，COM API 才能正常運作
+- win32com 存入 datetime 時會自動轉 UTC，程式內已用 `+timedelta(hours=8)` 補回台灣時區
+- 打卡文件建立後**無法刪除或修改**（ACL 限制），請確認時間正確再執行
+- `upload_joomla.py` 使用 `verify=False` 略過 SSL 驗證（因應醫院內網自簽憑證）

@@ -1,0 +1,6 @@
+.env
+venv/
+venv32/
+__pycache__/
+*.pyc
+checkin.log
