@@ -5,6 +5,41 @@
 
 ---
 
+## 系統流程圖
+
+```mermaid
+flowchart TD
+    A([Windows 工作排程器]) --> B[task_checkin_in.bat\ntask_checkin_out.bat]
+    B --> C[auto_checkin.py]
+
+    C --> D[1. Lotus Notes COM API]
+    D --> E[(hmsign.nsf\n打卡資料庫)]
+    E --> F{簽到退成功?}
+    F -- 失敗 --> ERR([結束 / 記錄錯誤])
+    F -- 成功 --> G[2. portal_login]
+
+    G --> H[GET /portal?]
+    H --> I{magic token\n存在?}
+    I -- 否，已登入 --> K
+    I -- 是 --> J[POST / 帳密 + magic token]
+    J --> K[3. send_line_message]
+
+    K --> L[LINE Messaging API]
+    L --> M([LINE 推播通知])
+
+    %% 新聞稿流程
+    N([手動執行]) --> O[query_news.py]
+    O --> P[Lotus Notes COM API]
+    P --> Q[(mddpdoc.nsf\n新聞稿資料庫)]
+    Q --> R[下載文章與圖片\noutput/]
+
+    R --> S[upload_joomla.py]
+    S --> T[Joomla 4 REST API]
+    T --> U([官網草稿文章])
+```
+
+---
+
 ## 系統需求
 
 | 項目 | 需求 |
