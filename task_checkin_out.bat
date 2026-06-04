@@ -1,4 +1,3 @@
 @echo off
 cd /d "C:\Users\peter\Desktop\autowork-lotusNotesCOM"
-call venv32\Scripts\activate.bat
-python auto_checkin.py out
+"C:\Users\peter\Desktop\autowork-lotusNotesCOM\venv32\Scripts\python.exe" auto_checkin.py out
