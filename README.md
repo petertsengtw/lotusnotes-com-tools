@@ -233,7 +233,7 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 
 ## 注意事項
 
-- **Lotus Notes 必須保持登入狀態**，COM API 才能正常運作
+- **Lotus Notes 必須安裝在系統上**，但不需要保持開啟或登入；`Initialize(password)` 會直接透過後端 COM API 建立 session
 - win32com 存入 datetime 時會自動轉 UTC，程式內已用 `+timedelta(hours=8)` 補回台灣時區
 - 打卡文件建立後**無法刪除或修改**（ACL 限制），請確認時間正確再執行
 - `upload_joomla.py` 使用 `verify=False` 略過 SSL 驗證（因應醫院內網自簽憑證）
