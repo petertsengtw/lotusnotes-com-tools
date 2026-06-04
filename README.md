@@ -1,6 +1,7 @@
-# autoRPA2 - Lotus Notes 自動化工具
+# autowork-lotusNotesCOM - Lotus Notes 自動化工具
 
-自動打卡與新聞稿擷取上傳工具，透過 Lotus Notes COM API 操作 Notes 資料庫，並支援將新聞稿上傳至 Joomla 4 網站。
+自動打卡、院內 Portal 上網認證、LINE 通知、新聞稿擷取與上傳工具。  
+透過 Lotus Notes COM API 操作 Notes 資料庫，並支援將新聞稿上傳至 Joomla 4 網站。
 
 ---
 
@@ -22,7 +23,7 @@
 & "C:\path\to\python32\python.exe" -m venv venv32
 
 # 安裝套件
-venv32\Scripts\pip.exe install pywin32 python-dotenv pillow requests
+venv32\Scripts\pip.exe install pywin32 python-dotenv requests beautifulsoup4
 ```
 
 ---
@@ -38,6 +39,13 @@ JOOMLA_URL=https://你的網站網址/home
 JOOMLA_TOKEN=你的JoomlaAPIToken
 JOOMLA_CATEGORY_ID=8
 JOOMLA_MEDIA_FOLDER=images/01news
+
+PORTAL_URL=https://hltchnet.tzuchi.com.tw:1003/
+PORTAL_USERNAME=你的員工編號
+PORTAL_PASSWORD=你的密碼
+
+LINE_CHANNEL_TOKEN=你的channel_access_token
+LINE_USER_ID=你的line_user_id
 ```
 
 > `.env` 已列入 `.gitignore`，不會被 git 追蹤。
@@ -46,7 +54,10 @@ JOOMLA_MEDIA_FOLDER=images/01news
 
 ## 功能一：自動打卡（`auto_checkin.py`）
 
-連線至 `hmsign.nsf`，建立簽到退卡文件。
+執行流程：
+1. **Lotus Notes 簽到／退** — 寫入 `hmsign.nsf`
+2. **Portal 登入** — POST 至院內上網認證頁面，取得對外網路
+3. **LINE 通知** — 推播完成訊息給自己
 
 ```powershell
 # 簽到
@@ -68,6 +79,18 @@ venv32\Scripts\python.exe auto_checkin.py out
 班別代碼：`N`=正常班　`A`=加班　`C`=OnCall　`S`=交接班
 
 **日誌：** `checkin.log`
+
+### LINE Messaging API 設定
+
+1. 至 [LINE Developers](https://developers.line.biz/) 建立 Messaging API Channel
+2. Basic settings → **Your user ID** → 填入 `.env` 的 `LINE_USER_ID`
+3. Messaging API → **Channel access token** → 產生並填入 `.env` 的 `LINE_CHANNEL_TOKEN`
+
+### Portal 登入說明
+
+- 使用 `http.client` 直接發送 HTTPS 請求（繞過 urllib3 的 ALPN/HTTP2 協商，與院內 pfSense portal 相容）
+- 流程：GET 取得 CSRF magic token → POST 送出帳密
+- 若 Portal 已登入，自動跳過 POST
 
 ### Windows 工作排程器
 
@@ -169,6 +192,7 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 ### 清理
 
 - [ ] 刪除 `test_image_extract.py`（開發期間的診斷腳本，已無用途）
+- [ ] 刪除 `debug_portal.py`、`test_portal_line.py`（開發期間的診斷腳本，已無用途）
 
 ---
 
@@ -178,3 +202,4 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 - win32com 存入 datetime 時會自動轉 UTC，程式內已用 `+timedelta(hours=8)` 補回台灣時區
 - 打卡文件建立後**無法刪除或修改**（ACL 限制），請確認時間正確再執行
 - `upload_joomla.py` 使用 `verify=False` 略過 SSL 驗證（因應醫院內網自簽憑證）
+- Portal 登入改用 `http.client` 直接發送，避免 urllib3 的 ALPN 協商與院內 pfSense 不相容
