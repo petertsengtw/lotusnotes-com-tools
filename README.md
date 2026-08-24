@@ -282,7 +282,7 @@ STORE_REMOTE_PATH=/var/www/html/store
 ### 清理
 
 - [ ] 刪除 `test_image_extract.py`（開發期間的診斷腳本，已無用途）
-- [ ] 刪除 `debug_portal.py`、`test_portal_line.py`（開發期間的診斷腳本，已無用途）
+- [x] 刪除 `debug_portal.py`、`test_portal_line.py`（開發期間的診斷腳本，已無用途）
 
 ---
 
