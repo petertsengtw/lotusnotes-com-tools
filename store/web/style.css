@@ -1,25 +1,39 @@
 :root {
-  --primary: #142a52;
-  --primary-light: #eef1f6;
+  --primary: #0345bf;
+  --primary-hover: #044cd0;
+  --primary-light: #e8edfb;
+  --accent: #1d8989;
   --bg: #ffffff;
   --card-bg: #ffffff;
-  --border: #e2e5eb;
-  --text: #2a2f38;
+  --border: #e5e8ee;
+  --text: #252525;
   --muted: #6b7280;
+  --footer-bg: #171717;
+  --footer-text: #ffffff;
+  --footer-muted: #a2a2a2;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: "Noto Sans TC", "Microsoft JhengHei", -apple-system, sans-serif;
+  font-family: "Noto Sans TC", "Noto Sans", "PingFang TC", "Microsoft JhengHei", Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
 }
 header {
-  background: var(--bg);
+  position: relative;
+  background: linear-gradient(180deg, var(--primary-light) 0%, var(--bg) 70%);
   color: var(--primary);
   padding: 28px 16px 18px;
   text-align: center;
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 4px rgba(3, 69, 191, 0.06);
+}
+header::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--primary), var(--accent), var(--primary-hover));
 }
 header h1 {
   margin: 0;
@@ -29,9 +43,10 @@ header h1 {
 }
 header .rule {
   width: 48px;
-  height: 2px;
-  background: var(--primary);
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
   margin: 12px auto;
+  border-radius: 2px;
 }
 header .subtitle {
   margin-top: 2px;
@@ -53,6 +68,7 @@ nav.tabs a {
   font-size: 0.95rem;
   font-weight: 600;
   border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
 }
 nav.tabs a:hover { color: var(--primary); }
 nav.tabs a.active {
@@ -73,6 +89,8 @@ nav.tabs a.active {
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 1rem;
+  background: #fff;
+  color: var(--text);
 }
 .controls select {
   padding: 10px 12px;
@@ -80,6 +98,13 @@ nav.tabs a.active {
   border-radius: 8px;
   font-size: 1rem;
   background: #fff;
+  color: var(--text);
+}
+.controls input[type=text]:focus,
+.controls select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(3, 69, 191, 0.15);
 }
 .meta {
   max-width: 900px;
@@ -98,21 +123,34 @@ nav.tabs a.active {
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-left: 4px solid var(--cat-accent, var(--primary));
+  border-radius: 12px;
   padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.card:hover {
+  box-shadow: 0 6px 16px rgba(3, 69, 191, 0.12);
+  transform: translateY(-2px);
 }
 .card .kind {
-  display: inline-block;
-  background: var(--primary-light);
-  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--cat-bg, var(--primary-light));
+  color: var(--cat-accent, var(--primary));
   font-size: 0.78rem;
-  padding: 2px 8px;
+  font-weight: 600;
+  padding: 2px 9px;
   border-radius: 999px;
   margin-bottom: 6px;
 }
-.card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.card .kind .icon { font-size: 0.9rem; line-height: 1; }
+.card h3 { margin: 0 0 6px; font-size: 1.05rem; transition: color 0.2s; }
+.card:hover h3 { color: var(--accent); }
 .card p { margin: 3px 0; font-size: 0.92rem; }
 .card a.address { color: var(--primary); text-decoration: underline; }
+.card a.address:hover { color: var(--primary-hover); }
 .card .expire { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
 .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 .disclaimer {
@@ -123,7 +161,16 @@ nav.tabs a.active {
   font-size: 0.8rem;
   text-align: center;
 }
-footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 12px 0 40px; }
+footer {
+  background: var(--footer-bg);
+  color: var(--footer-muted);
+  text-align: center;
+  font-size: 0.8rem;
+  padding: 20px 16px 32px;
+  margin-top: 24px;
+}
+footer #updated { color: var(--footer-muted); }
+footer div:last-child { color: var(--footer-text); font-weight: 600; margin-top: 4px; }
 
 /* 內文頁（加入特約 / Q&A）共用樣式 */
 .content {
@@ -141,12 +188,14 @@ footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 12
 .content p { margin: 8px 0; color: var(--text); }
 .content .contact-box {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px 20px;
   margin-top: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 .content .contact-box p { margin: 4px 0; }
 .content .contact-box a { color: var(--primary); }
+.content .contact-box a:hover { color: var(--primary-hover); }
 .qa-item {
   border-bottom: 1px solid var(--border);
   padding: 16px 0;
@@ -162,12 +211,18 @@ footer { text-align: center; color: var(--muted); font-size: 0.8rem; padding: 12
 @media (prefers-color-scheme: dark) {
   :root {
     --primary: #5b9bd8;
+    --primary-hover: #7ab0e6;
     --primary-light: #16324d;
+    --accent: #3fb8b8;
     --bg: #10161f;
     --card-bg: #1a2330;
     --border: #2c3a4c;
     --text: #eaeef3;
     --muted: #93a1b5;
+    --footer-bg: #0a0e14;
+    --footer-text: #eaeef3;
+    --footer-muted: #93a1b5;
   }
+  .controls input[type=text],
   .controls select { background: #1a2330; color: #eaeef3; }
 }

@@ -31,7 +31,38 @@
   </footer>
 
 <script>
-const state = { all: [], keyword: "", kind: "" };
+const state = { all: [], keyword: "", kind: "", categoryColors: new Map() };
+
+const CATEGORY_PALETTE = [
+  { accent: "#0345bf", bg: "#e8edfb" }, // 藍
+  { accent: "#1d8989", bg: "#e3f3f2" }, // 青
+  { accent: "#c65a04", bg: "#fdece0" }, // 橘
+  { accent: "#3c7a3f", bg: "#e7f3e8" }, // 綠
+  { accent: "#6a4fa0", bg: "#efe9f8" }, // 紫
+  { accent: "#b0396b", bg: "#fbe8f0" }, // 玫瑰
+];
+
+const ICON_RULES = [
+  [/餐|飲|小吃|咖啡|茶|美食/, "🍽️"],
+  [/藥|診所|醫療|健康/, "💊"],
+  [/3C|電腦|手機|通訊|3c/, "💻"],
+  [/眼鏡/, "👓"],
+  [/美容|美髮|美甲|spa|SPA|沙龍/, "💇"],
+  [/服飾|精品|鞋|包/, "👕"],
+  [/書|文具/, "📚"],
+  [/運動|健身/, "🏋️"],
+  [/汽車|機車|修車|保養/, "🚗"],
+  [/旅遊|住宿|飯店|民宿/, "🏨"],
+  [/生活|百貨|超市|量販/, "🛒"],
+];
+
+function iconFor(kind) {
+  if (!kind) return "🏬";
+  for (const [re, icon] of ICON_RULES) {
+    if (re.test(kind)) return icon;
+  }
+  return "🏬";
+}
 
 async function load() {
   const res = await fetch("./stores.json", { cache: "no-store" });
@@ -44,6 +75,8 @@ async function load() {
   }
 
   const kinds = [...new Set(state.all.map(s => s.kind).filter(Boolean))].sort();
+  kinds.forEach((k, i) => state.categoryColors.set(k, CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]));
+
   const kindSelect = document.getElementById("kind");
   for (const k of kinds) {
     const opt = document.createElement("option");
@@ -84,8 +117,11 @@ function render() {
   for (const s of filtered) {
     const card = document.createElement("div");
     card.className = "card";
+    const color = state.categoryColors.get(s.kind) || CATEGORY_PALETTE[0];
+    card.style.setProperty("--cat-accent", color.accent);
+    card.style.setProperty("--cat-bg", color.bg);
     card.innerHTML = `
-      <span class="kind">${escapeHtml(s.kind || "未分類")}</span>
+      <span class="kind"><span class="icon">${iconFor(s.kind)}</span>${escapeHtml(s.kind || "未分類")}</span>
       <h3>${escapeHtml(s.name)}</h3>
       <p>📍 ${s.address ? `<a class="address" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}" target="_blank" rel="noopener">${escapeHtml(s.address)}</a>` : ""}</p>
       <p>📞 ${escapeHtml(s.tel || "")}</p>
