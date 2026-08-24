@@ -4,3 +4,5 @@ venv32/
 __pycache__/
 *.pyc
 checkin.log
+holidays.txt
+store/output/

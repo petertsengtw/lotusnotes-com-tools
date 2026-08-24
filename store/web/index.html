@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>花蓮慈濟醫院特約商店查詢</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <h1>花蓮慈濟醫院特約商店查詢</h1>
+    <div class="rule"></div>
+    <div class="subtitle">感恩特約商店支持，讓愛與感恩延續</div>
+  </header>
+  <nav class="tabs">
+    <a href="./index.html" class="active">特約查詢</a>
+    <a href="./join.html">加入特約</a>
+    <a href="./qa.html">Q&amp;A</a>
+  </nav>
+
+  <div class="controls">
+    <input type="text" id="keyword" placeholder="搜尋商店名稱、地址或優惠內容…">
+    <select id="kind"><option value="">全部類別</option></select>
+  </div>
+  <div class="meta" id="meta"></div>
+  <div class="list" id="list"></div>
+  <div class="disclaimer">各特約商店優惠內容，依雙方簽訂合約條款或店家現場公告為準，如有異動請以店家最新公告為主。</div>
+  <footer>
+    <div id="updated"></div>
+    <div>職工福利行政小組</div>
+  </footer>
+
+<script>
+const state = { all: [], keyword: "", kind: "" };
+
+async function load() {
+  const res = await fetch("./stores.json", { cache: "no-store" });
+  const data = await res.json();
+  state.all = data.stores || [];
+
+  if (data.generated_at) {
+    document.getElementById("updated").textContent =
+      `資料更新時間：${data.generated_at.replace("T", " ")}`;
+  }
+
+  const kinds = [...new Set(state.all.map(s => s.kind).filter(Boolean))].sort();
+  const kindSelect = document.getElementById("kind");
+  for (const k of kinds) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k;
+    kindSelect.appendChild(opt);
+  }
+
+  render();
+}
+
+function render() {
+  const kw = state.keyword.trim();
+  const list = document.getElementById("list");
+  const meta = document.getElementById("meta");
+
+  if (!kw && !state.kind) {
+    meta.textContent = `共 ${state.all.length} 筆，請輸入關鍵字或選擇類別開始查詢`;
+    list.innerHTML = "";
+    return;
+  }
+
+  const filtered = state.all.filter(s => {
+    if (state.kind && s.kind !== state.kind) return false;
+    if (!kw) return true;
+    const hay = `${s.name} ${s.address} ${s.contents} ${s.tel}`;
+    return hay.includes(kw);
+  });
+
+  meta.textContent = `共 ${filtered.length} 筆（總計 ${state.all.length} 筆）`;
+  list.innerHTML = "";
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">查無符合條件的商店</div>';
+    return;
+  }
+
+  for (const s of filtered) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <span class="kind">${escapeHtml(s.kind || "未分類")}</span>
+      <h3>${escapeHtml(s.name)}</h3>
+      <p>📍 ${s.address ? `<a class="address" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}" target="_blank" rel="noopener">${escapeHtml(s.address)}</a>` : ""}</p>
+      <p>📞 ${escapeHtml(s.tel || "")}</p>
+      <div class="expire">優惠期限：${s.expire ? s.expire.replaceAll("-", "/") : "長期"}</div>
+    `;
+    list.appendChild(card);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+document.getElementById("keyword").addEventListener("input", e => {
+  state.keyword = e.target.value;
+  render();
+});
+document.getElementById("kind").addEventListener("change", e => {
+  state.kind = e.target.value;
+  render();
+});
+
+load();
+</script>
+</body>
+</html>

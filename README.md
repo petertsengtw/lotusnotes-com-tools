@@ -115,6 +115,18 @@ venv32\Scripts\python.exe auto_checkin.py out
 
 **日誌：** `checkin.log`
 
+### 放假日跳過打卡
+
+在專案根目錄的 `holidays.txt` 中，一行寫一個日期（格式 `YYYY-MM-DD`，`#` 之後視為註解），若執行當天的日期出現在清單中，`auto_checkin.py` 會**整個流程都跳過**（不打卡、不登入 Portal、不發 LINE 通知），僅在 `checkin.log` 留下一筆紀錄。
+
+```
+# holidays.txt 範例
+2026-08-21          # 特休
+2026-10-10          # 國慶日
+```
+
+`holidays.txt` 不存在或內容為空時，視為沒有放假日，照常執行打卡（不會報錯）。此檔案已列入 `.gitignore`，不會被 git 追蹤。
+
 ### LINE Messaging API 設定
 
 1. 至 [LINE Developers](https://developers.line.biz/) 建立 Messaging API Channel
@@ -203,6 +215,36 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 
 ---
 
+## 功能四：特約商店查詢頁（`store/`）
+
+從 `ContributingStore.nsf` 匯出未作廢、未過期的特約商店清單，部署成一個給院內同仁用手機查詢的靜態網頁（放在 Joomla 網站的子目錄下，無需登入密碼，只要知道網址即可查詢）。
+
+```powershell
+venv32\Scripts\python.exe store\deploy_store.py
+```
+
+流程：匯出最新 `store/output/stores.json` → 透過 SSH 金鑰用 `scp` 把 `store/web/`（`index.html` 特約查詢、`join.html` 加入特約、`qa.html` 常見問題、`style.css` 共用樣式）與 `stores.json` 上傳到 Ubuntu 網站伺服器的 `STORE_REMOTE_PATH`。
+
+**這支腳本目前必須手動執行**（不走排程）：因為這台機器的 Notes ID 沒有開放「允許其他 Notes 程式使用此密碼」，`Initialize()` 會跳出互動式密碼輸入視窗，需要在畫面上手動輸入密碼才能繼續，無法無人值守跑排程。之後如果想改成排程，要先在 Notes 用戶端的 **File → Security → User Security** 把該選項打開。
+
+**`.env` 需要的欄位：**
+
+```
+SFTP_HOST=10.2.116.138
+SFTP_PORT=22
+SFTP_USER=你的SSH帳號
+SFTP_KEY_PATH=C:\Users\peter\.ssh\tzuchi_store_deploy
+STORE_REMOTE_PATH=/var/www/html/store
+```
+
+金鑰登入需要先把 `store/deploy_store.py` 用的公鑰（`%USERPROFILE%\.ssh\tzuchi_store_deploy.pub`）加到 Ubuntu 伺服器該帳號的 `~/.ssh/authorized_keys`。
+
+**為什麼用 SSH 金鑰而不是 `paramiko`？** 這台機器是 Python 3.14（32-bit），`paramiko` 依賴的 `cryptography` 目前在 PyPI 上還沒有 cp314-win32 的預編譯 wheel，會退回原始碼建置並卡在院內網路的 SSL 憑證攔截。改用 Windows 內建的 OpenSSH 用戶端（`ssh.exe` / `scp.exe`）不用額外裝套件，也剛好符合排程需要非互動式登入（金鑰）的需求。
+
+**查詢頁目前沒有存取控制**：資料本身是店家自願提供給同仁的優惠，敏感度低，所以刻意不加密碼關卡，只靠網址不公開。之後如果要加驗證，比起自建帳密系統，建議優先考慮 Joomla 既有的登入機制。
+
+---
+
 ## 工具腳本
 
 | 檔案 | 說明 |
@@ -210,6 +252,11 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 | `check_notes.py` | 列出 hmsign.nsf 所有 View（維護用） |
 | `inspect_news.py` | 列出 mddpdoc.nsf 的 View、Form 及第一筆欄位（維護用） |
 | `query_checkin.py` | 查詢指定日期區間的打卡紀錄 |
+| `store/inspect_store.py` | 列出 ContributingStore.nsf（特約商店）的 View、Form 及各 View 第一筆欄位（維護用） |
+| `store/notes_store.py` | 共用模組：讀取未作廢、未過期的特約商店清單 |
+| `store/query_store.py` | 互動式查詢特約商店，可依類別篩選、選擇性輸出 CSV |
+| `store/export_store_json.py` | 匯出特約商店清單成 `store/output/stores.json`（給查詢頁用） |
+| `store/deploy_store.py` | 匯出 JSON 並透過 SSH 金鑰部署查詢頁到 Ubuntu 網站伺服器 |
 
 ---
 

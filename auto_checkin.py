@@ -7,7 +7,7 @@ Lotus Notes 自動簽到退
 import sys
 import logging
 import ssl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import win32com.client
 from dotenv import load_dotenv
 import os
@@ -39,6 +39,7 @@ SIGN_TYPE = "N"   # N=正常班, A=加班, C=OnCall, S=交接班
 # ────────────────────────────────────────────────────
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "checkin.log")
+HOLIDAY_FILE = os.path.join(os.path.dirname(__file__), "holidays.txt")
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -47,6 +48,34 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     encoding="utf-8",
 )
+
+
+def is_holiday(check_date: date) -> bool:
+    """讀取 HOLIDAY_FILE，判斷 check_date 是否為放假日。
+    找不到檔案 / 解析失敗一律視為「非放假日」，避免影響正常打卡。
+    """
+    if not os.path.isfile(HOLIDAY_FILE):
+        logging.info(f"找不到放假日清單 {HOLIDAY_FILE}，視為無放假日")
+        return False
+
+    try:
+        with open(HOLIDAY_FILE, "r", encoding="utf-8-sig") as f:
+            lines = f.readlines()
+    except Exception as e:
+        logging.error(f"讀取放假日清單失敗: {e}，視為無放假日")
+        return False
+
+    holidays = set()
+    for line in lines:
+        text = line.split("#", 1)[0].strip()
+        if not text:
+            continue
+        try:
+            holidays.add(datetime.strptime(text, "%Y-%m-%d").date())
+        except ValueError:
+            logging.warning(f"放假日清單格式錯誤，略過: {line.strip()!r}")
+
+    return check_date in holidays
 
 
 def checkin(status: str):
@@ -184,6 +213,12 @@ if __name__ == "__main__":
 
     action = sys.argv[1]
     label  = "簽到" if action == "in" else "簽退"
+
+    today = datetime.now().date()
+    if is_holiday(today):
+        logging.info(f"{today} 為放假日，跳過本次打卡流程")
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 今日為放假日，跳過打卡")
+        sys.exit(0)
 
     checkin("1" if action == "in" else "0")
     portal_login()
