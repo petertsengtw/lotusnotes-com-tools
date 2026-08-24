@@ -45,23 +45,31 @@ with open(JSON_PATH, "w", encoding="utf-8") as f:
     json.dump(payload, f, ensure_ascii=False, indent=2)
 print(f"已匯出 {len(stores)} 筆")
 
+# SSH 選項共用：BatchMode 避免金鑰失敗時卡住等密碼輸入；
+# 在 VS Code 整合終端機裡，scp 用 \r 覆寫的進度條會卡住該終端機的 pty，
+# 因此一律用 capture_output 擷取輸出，不讓進度條直接寫進終端機。
+SSH_OPTS = ["-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+
+def run_ssh(args, check=True):
+    result = subprocess.run(args, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise SystemExit(
+            f"指令失敗（exit {result.returncode}）: {' '.join(args)}\n{result.stderr}"
+        )
+    return result
+
 # ── 確保遠端目錄存在 ──────────────────────────────────
-subprocess.run(
-    [SSH_EXE, "-i", SFTP_KEY_PATH, "-p", SFTP_PORT,
-     "-o", "StrictHostKeyChecking=accept-new",
-     SSH_TARGET, f"mkdir -p {STORE_REMOTE_PATH}"],
-    check=True,
-)
+run_ssh([SSH_EXE, "-i", SFTP_KEY_PATH, "-p", SFTP_PORT, *SSH_OPTS,
+         SSH_TARGET, f"mkdir -p {STORE_REMOTE_PATH}"])
 
 # ── 上傳檔案（偶發網路問題時重試一次）──────────────────
 for local_path in (*WEB_FILES, JSON_PATH):
-    scp_cmd = [SCP_EXE, "-i", SFTP_KEY_PATH, "-P", SFTP_PORT,
-               "-o", "StrictHostKeyChecking=accept-new",
+    scp_cmd = [SCP_EXE, "-i", SFTP_KEY_PATH, "-P", SFTP_PORT, *SSH_OPTS,
                local_path, f"{SSH_TARGET}:{STORE_REMOTE_PATH}/"]
-    result = subprocess.run(scp_cmd)
+    result = run_ssh(scp_cmd, check=False)
     if result.returncode != 0:
-        print(f"上傳 {os.path.basename(local_path)} 失敗，重試一次...")
-        subprocess.run(scp_cmd, check=True)
+        print(f"上傳 {os.path.basename(local_path)} 失敗，重試一次...\n{result.stderr}")
+        run_ssh(scp_cmd)
     print(f"已上傳：{os.path.basename(local_path)}")
 
 print("部署完成")
