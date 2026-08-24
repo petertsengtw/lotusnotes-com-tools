@@ -36,6 +36,14 @@ flowchart TD
     R --> S[upload_joomla.py]
     S --> T[Joomla 4 REST API]
     T --> U([官網草稿文章])
+
+    %% 特約商店查詢頁流程
+    V([手動執行]) --> W[deploy_store.py]
+    W --> X[Lotus Notes COM API]
+    X --> Y[(ContributingStore.nsf\n特約商店資料庫)]
+    Y --> Z[匯出 store/output/stores.json]
+    Z --> AA[SSH 金鑰 + scp 上傳]
+    AA --> AB([Ubuntu 網站伺服器\nstore/web/ 查詢頁])
 ```
 
 ---
