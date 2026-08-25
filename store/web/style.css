@@ -151,6 +151,15 @@ nav.tabs a.active {
 .card p { margin: 3px 0; font-size: 0.92rem; }
 .card a.address { color: var(--primary); text-decoration: underline; }
 .card a.address:hover { color: var(--primary-hover); }
+.card .offer {
+  margin: 8px 0 3px;
+  padding: 8px 10px;
+  background: var(--cat-bg, var(--primary-light));
+  color: var(--cat-accent, var(--primary));
+  font-size: 0.9rem;
+  line-height: 1.6;
+  border-radius: 8px;
+}
 .card .expire { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
 .empty { text-align: center; color: var(--muted); padding: 40px 0; }
 .disclaimer {
