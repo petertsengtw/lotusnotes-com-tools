@@ -82,8 +82,10 @@ def checkin(status: str):
     """status: '1'=簽到  '0'=簽退"""
     label = "簽到" if status == "1" else "簽退"
     try:
+        pw = os.getenv("NOTES_PASSWORD", "")
+        logging.info(f"準備呼叫 Initialize，NOTES_PASSWORD 長度={len(pw)}（0 代表 .env 未讀到值）")
         notes = win32com.client.Dispatch("Lotus.NotesSession")
-        notes.Initialize(os.getenv("NOTES_PASSWORD", ""))
+        notes.Initialize(pw)
         db = notes.GetDatabase(SERVER, DB_PATH)
         if not db.IsOpen:
             raise RuntimeError("無法開啟資料庫")
