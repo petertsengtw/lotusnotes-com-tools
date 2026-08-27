@@ -57,8 +57,10 @@ flowchart TD
     AD --> AE[Cloud Functions\nadmin_push_stores]
     AE --> AF[(Firestore\nstoreData)]
 
-    %% 同仁查詢：LINE@ + LIFF 身分驗證
-    AB -. 掃 QR Code / 點連結 .-> AG([LIFF 驗證查詢頁\nstore/web/liff/])
+    %% 同仁查詢：先加好友，再透過圖文選單進 LIFF 身分驗證
+    AB -. 掃 QR Code / 點連結 .-> AR([加入 LINE@ 好友])
+    AR --> AS([圖文選單「特約商店查詢」\nLINE OA Manager 設定，非本專案])
+    AS --> AG([LIFF 驗證查詢頁\nstore/web/liff/])
     AG --> AH{已完成驗證?}
     AH -- 否，首次使用 --> AI[輸入姓名/Notes ID\n+ 本期驗證碼]
     AI --> AJ[Cloud Functions\nverify]
@@ -67,12 +69,11 @@ flowchart TD
     AL --> AF
     AL --> AG
 
-    %% 期效性驗證碼換發與廣播
+    %% 期效性驗證碼換發
     AM([季度手動執行]) --> AN[broadcast_code.py]
     AN --> AO[Cloud Functions\nadmin_rotate_code]
     AO --> AK
-    AN --> AP[Lotus Notes COM API\nsend_broadcast_mail]
-    AP --> AQ([院內同仁群組信\nLINE@ QR Code + 本期驗證碼])
+    AN --> AP([印出新驗證碼\n福委會人工張貼院內公佈欄])
 ```
 
 ---
@@ -254,7 +255,7 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 
 ## 功能四：特約商店查詢頁（`store/`）
 
-從 `ContributingStore.nsf` 匯出未作廢、未過期的特約商店清單，部署成一個給院內同仁用手機查詢的網頁。**查詢頁已上線存取控制**（見下方「特約商店查詢頁存取控制」）：`store/web/index.html` 現在是一個說明頁面，附上 LIFF 驗證查詢頁的 QR Code 跟連結，實際查詢資料只能透過 LINE 登入 + 驗證碼綁定後取得。
+從 `ContributingStore.nsf` 匯出未作廢、未過期的特約商店清單，部署成一個給院內同仁用手機查詢的網頁。**查詢頁已上線存取控制**（見下方「特約商店查詢頁存取控制」）：`store/web/index.html` 現在是一個說明頁面，附上加入 LINE@ 好友的 QR Code 跟連結；同仁加好友後透過圖文選單進入 LIFF 查詢頁，實際查詢資料只能透過 LINE 登入 + 驗證碼綁定後取得。
 
 > **`store/deploy_store.py` 平常不要再執行**：這支腳本會把 `stores.json`（完整店家資料）跟其他靜態頁面一起 scp 到正式站，一旦跑了就會讓 `stores.json` 重新變成任何人都能直接用網址抓取的公開檔案，等於繞過剛做好的存取控制。目前只保留這支腳本的原始碼與說明供參考／未來需要時查閱，日常更新特約商店清單一律改用下面的 `sync_stores_to_firestore.py`。若真的需要重跑 `deploy_store.py`（例如要更新 `join.html`/`qa.html`/`style.css` 這些靜態頁），跑完務必手動把正式站上的 `stores.json` 刪掉。
 
@@ -282,9 +283,9 @@ STORE_REMOTE_PATH=/var/www/html/store
 
 ### 特約商店查詢頁存取控制（已上線）
 
-完整設計見 `sdd3.md` §5。同仁掃 LINE@ QR code 加好友、在 LIFF 頁輸入姓名/Notes ID + 院內公告信件裡的本期驗證碼完成綁定，之後查詢優惠都透過這個 LINE@ 進行，不用重複驗證。後端是 Cloud Functions（Python）+ Firestore（專案 `hlwelfare`），本機這台機器完全不持有 Firebase 憑證，只用共用密鑰打 Cloud Functions 的 admin 端點——見 `firebase/` 目錄與下方新增的工具腳本。
+完整設計見 `sdd3.md` §5。同仁掃 LINE@ QR code 加好友、點選圖文選單「特約商店查詢」，第一次使用會在 LIFF 頁輸入姓名/Notes ID + 院內公佈欄公告裡的本期驗證碼完成綁定，之後查詢優惠都透過這個 LINE@ 進行，不用重複驗證。後端是 Cloud Functions（Python）+ Firestore（專案 `hlwelfare`），本機這台機器完全不持有 Firebase 憑證，只用共用密鑰打 Cloud Functions 的 admin 端點——見 `firebase/` 目錄與下方新增的工具腳本。
 
-已完成並實測：Cloud Functions 五支端點（`verify`／`stores`／`admin_push_stores`／`admin_rotate_code`／`admin_import_roster`）部署上線、`store/web/liff/index.html` 部署上線、真實 LINE 帳號走完「加好友 → 輸入姓名+驗證碼 → 查詢」全流程、`store/web/index.html` 正式切換成 QR Code 說明頁（連到 LIFF 頁）、正式站殘留的公開 `stores.json` 已刪除。
+已完成並實測：Cloud Functions 五支端點（`verify`／`stores`／`admin_push_stores`／`admin_rotate_code`／`admin_import_roster`）部署上線、`store/web/liff/index.html` 部署上線、真實 LINE 帳號走完「加好友 → 輸入姓名+驗證碼 → 查詢」全流程、`store/web/index.html` 正式切換成附加入 LINE@ 好友 QR Code 的說明頁（圖文選單「特約商店查詢」已在 LINE Official Account Manager 設定好連到 LIFF 頁，非本專案程式碼處理）、正式站殘留的公開 `stores.json` 已刪除。
 
 **重新部署 Cloud Functions（改程式碼後才需要）：**
 
@@ -300,7 +301,6 @@ firebase deploy --only functions
 ```
 STORE_AUTH_FUNCTIONS_BASE_URL=https://us-central1-hlwelfare.cloudfunctions.net
 ADMIN_SHARED_SECRET=（要跟 Cloud Functions 那端 ADMIN_SHARED_SECRET secret 的值一致）
-NOTES_BROADCAST_GROUP=（院內同仁群組信箱位址，尚未填寫）
 LIFF_ID=2011285225-tzE9fFFl
 STORE_LIFF_URL=https://liff.line.me/2011285225-tzE9fFFl
 ```
@@ -311,9 +311,10 @@ STORE_LIFF_URL=https://liff.line.me/2011285225-tzE9fFFl
 # 把最新特約商店清單同步到 Firestore（給 LIFF 查詢頁用，取代 deploy_store.py 平常的角色）
 venv32\Scripts\python.exe store\sync_stores_to_firestore.py
 
-# 換一組新的期效性驗證碼，並寄廣播信給院內同仁（季度執行，跟 deploy_store.py 一樣要手動輸入 Notes 密碼；
-# 需要先在 .env 填好 NOTES_BROADCAST_GROUP 才能用）
-venv32\Scripts\python.exe store\broadcast_code.py
+# 換一組新的期效性驗證碼並印出來（季度執行）。公告本身透過院內另一個 Notes 公佈欄
+# 資料庫人工張貼，不是本專案程式碼處理的範圍。第一個參數是部門/情境名稱，純粹自己
+# 追蹤用，不同名稱各自獨立換碼、互不影響。
+venv32\Scripts\python.exe store\broadcast_code.py 職工福利小組
 
 # 季度在職名單覆核：先 dry-run 看報告，確認沒問題再加 --commit 真的撤銷
 venv32\Scripts\python.exe store\import_roster.py 名單.csv
@@ -323,7 +324,7 @@ venv32\Scripts\python.exe store\import_roster.py 名單.csv --commit
 venv32\Scripts\python.exe store\deploy_liff.py
 ```
 
-**尚未完成**（見 `sdd3.md` §9、§10）：連續打錯驗證碼會不會真的鎖定，還沒有拿真實 Firestore 環境測過（需要一個尚未驗證過的 LINE 身分才能測）；`NOTES_BROADCAST_GROUP` 還沒填寫，`broadcast_code.py` 還不能用；季度在職名單真實欄位格式尚未確認。
+**尚未完成**（見 `sdd3.md` §9、§10）：連續打錯驗證碼會不會真的鎖定，還沒有拿真實 Firestore 環境測過（需要一個尚未驗證過的 LINE 身分才能測）；季度在職名單真實欄位格式尚未確認。
 
 ---
 
@@ -340,7 +341,7 @@ venv32\Scripts\python.exe store\deploy_liff.py
 | `store/export_store_json.py` | 匯出特約商店清單成 `store/output/stores.json`（給查詢頁用） |
 | `store/deploy_store.py` | 匯出 JSON 並透過 SSH 金鑰部署查詢頁到 Ubuntu 網站伺服器 |
 | `store/sync_stores_to_firestore.py` | 把特約商店清單同步到 Firestore，供存取控制上線後的 `/stores` API 使用 |
-| `store/broadcast_code.py` | 換一組新的期效性驗證碼，並寄廣播信給院內同仁群組信箱 |
+| `store/broadcast_code.py` | 換一組新的期效性驗證碼並印出來，供人工張貼到院內公佈欄；不同部門/情境各自獨立換碼 |
 | `store/import_roster.py` | 匯入季度在職名單，覆核已驗證的 LINE 使用者是否還在職（預設 dry-run，`--commit` 才真的撤銷） |
 | `store/deploy_liff.py` | 部署 LIFF 驗證查詢頁（`store/web/liff/index.html`）到 Ubuntu 網站伺服器 |
 

@@ -5,8 +5,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "active", "order": "ASCENDING" },
-        { "fieldPath": "validFrom", "order": "ASCENDING" },
-        { "fieldPath": "validUntil", "order": "ASCENDING" }
+        { "fieldPath": "label", "order": "ASCENDING" }
       ]
     }
   ],

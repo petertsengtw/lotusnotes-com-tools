@@ -111,8 +111,11 @@ def admin_rotate_code(req: https_fn.Request) -> https_fn.Response:
         return _json_response({"ok": False, "error": "unauthorized"}, 401)
 
     body = req.get_json(silent=True) or {}
+    label = (body.get("label") or "").strip()
+    if not label:
+        return _json_response({"ok": False, "error": "missing_label"}, 400)
     days_valid = body.get("daysValid", 90)
-    result = generate_and_activate_code(_db(), days_valid=days_valid)
+    result = generate_and_activate_code(_db(), label=label, days_valid=days_valid)
     return _json_response({"ok": True, **result})
 
 
