@@ -71,7 +71,7 @@
 | `qa.html` | 常見問題（靜態內容） |
 | `style.css` | 共用樣式（花蓮慈濟醫院官網視覺風格：主色 `#0345bf`、青色點綴 `#1d8989`） |
 
-> **§5 上線後，這一節會有架構性變動**：`stores.json` 目前是任何人都能直接用網址抓到的靜態檔案；若只在 `index.html` 前面加一道 LINE 登入畫面、`stores.json` 仍是公開靜態檔，等於沒有真正擋住資料本身。實作 §5 時，`stores.json` 的取得方式需要改成「帶身分憑證呼叫後端 API」，而不是直接 fetch 靜態檔（詳見 §5.3、§5.5）。
+> **§5 已上線，本節內容現況已變動（2026-08-27）**：`store/web/index.html` 已從原本直接 `fetch("./stores.json")` 的查詢頁，改成一個純說明頁面（附 LIFF 驗證查詢頁的 QR Code 與連結，供同仁用手機 LINE 掃描/點選加入）；正式站上原本公開的 `stores.json` 已手動刪除，`store/deploy_store.py` 這支腳本平常不再執行（會重新把 `stores.json` 公開），改由 `store/sync_stores_to_firestore.py` 負責把資料同步到 Firestore，供帶身分憑證的 `/stores` API 使用（詳見 §5.3、§5.5，以及本文件實作計畫的「架構總覽」）。`deploy_store.py` 的程式碼保留，供未來需要更新 `join.html`/`qa.html`/`style.css` 時使用。
 
 ### 4.5 匯出/部署流程圖
 
@@ -89,7 +89,7 @@ flowchart TD
     J --> K([同仁瀏覽器打開網址\n前端 fetch stores.json 顯示查詢頁])
 ```
 
-## 5. 設計：存取控制（LINE@ + 期效性驗證碼，規劃中，尚未實作）
+## 5. 設計：存取控制（LINE@ + 期效性驗證碼，已上線，2026-08-27）
 
 > 本節取代了較早期「個人化 Notes 信箱驗證連結」的設計（原始版本見 git 歷史）。實測福委會共用的 Notes 帳號**只能寄信，無法存取/查詢 Domino 通訊錄**，原設計依賴的「輸入 Notes ID → 查通訊錄取得信箱 → 寄個人化驗證連結」技術上不可行，已放棄，改為本節的「廣播式期效性驗證碼」設計。
 
@@ -131,6 +131,15 @@ flowchart TD
 | `lockedUntil` | timestamp \| null | 鎖定解除時間，超過失敗次數上限後鎖定一段時間 |
 
 **刻意不存的欄位**：身分證字號、電話等其他個資。`notesId` 是自報值，不是查證過的身分。
+
+**Collection：`storeData`**，Document ID 固定為 `current`
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `generated_at` | string | 資料產生時間，跟 `stores.json` 的同名欄位同格式 |
+| `stores` | array | 商店清單，欄位結構與現行 `stores.json` 的 `stores` 陣列相同（`name`/`kind`/`tel`/`address`/`contents`/`expire`） |
+
+由 `store/sync_stores_to_firestore.py`（複用 `notes_store.fetch_active_stores()`）寫入，`/stores` 端點驗證身分通過後直接回傳這份文件。跟 §4 現有 `stores.json` 的公開靜態檔完全獨立，兩邊各自部署、互不影響（實作時的決策，見 `firebase/functions/main.py`）。
 
 ### 5.3 驗證與查詢流程
 
@@ -206,6 +215,8 @@ sequenceDiagram
 1. 這份季度名單目前的識別欄位是什麼（Notes ID／工號／純姓名）？若不是 Notes ID，需要先有一步轉換或由福委會提供對照。
 2. `lineAuth.notesId` 是同仁**自報**的值（沒有經過通訊錄驗證真偽），若同仁打錯字或格式跟名單不一致（例如漏打地區前綴「花蓮」），會被誤判為離職而撤銷——需要設計比對時的容錯（例如只比對姓名去掉地區前綴後的部分），或在撤銷前先做人工覆核一次再正式生效。
 
+**實作現況（暫定，等上述待確認事項有答案再調整）**：`firebase/functions/roster_match.py` 先用「去除常見縣市地區前綴後比對姓名」當容錯規則，且 `admin_import_roster` 端點預設 `commit=false`（只回傳 dry-run 差異報告，不會真的撤銷），要操作者確認報告合理後再帶 `commit=true` 執行一次才會真的寫入 `revoked`——等於已經內建了「人工覆核」這一步，不會因為比對邏輯還不成熟就直接誤判撤銷在職同仁。另外加了一道防呆：新名單筆數若少於目前已驗證人數的一半，預設直接擋下（防止誤傳截斷檔案），需要帶 `force=true` 才會略過。
+
 ## 6. 對 Joomla 正式站的影響面
 
 與新聞稿上傳功能不同，本功能**完全不經過 Joomla 的 REST API 或資料庫**：
@@ -250,16 +261,16 @@ sequenceDiagram
 - [x] 已實際部署上線
 - [ ] SCP 部署失敗時的重試與中止行為尚未有意外情境下的實測記錄（僅程式邏輯層面確認）
 
-**存取控制（規劃中，待實作）**
-- [ ] 福委會可透過既有 Notes COM API 程式化寄送廣播信給院內同仁群組信箱（權限已於 §5.6 確認可行，此項待實作程式化寄送並測試）
-- [ ] 同仁可在 LIFF 輸入姓名/Notes ID + 驗證碼完成驗證，Firestore 正確寫入 `lineAuth` 為 verified
-- [ ] 驗證碼錯誤時不會誤判成功，且連續錯誤達上限會被鎖定（`codeAttempts`）
-- [ ] 驗證碼過期後輸入會被拒絕並提示重新取得最新碼
-- [ ] 未驗證／已撤銷的 LINE userId 呼叫查詢 API 會被拒絕，只有 verified 才能取得商店清單
-- [ ] `stores.json` 不再是可被直接以網址取得的公開靜態檔案
-- [ ] Firestore 安全規則已鎖死前端直接寫入 `lineAuth.status` 的能力，僅後端可寫入
-- [ ] 每季名單匯入後，不在名單中的已驗證 LINE userId 會被改為 `revoked`，且 `revoked` 帳號無法再查詢
-- [ ] 名單匯入時能檢查基本格式（筆數、必要欄位），避免匯入異常名單造成大量誤撤銷
+**存取控制（已部署上線，2026-08-27 用真實 LINE 帳號實測過核心流程）**
+- [ ] 福委會可透過既有 Notes COM API 程式化寄送廣播信給院內同仁群組信箱（權限已於 §5.6 確認可行，`notes_store.send_broadcast_mail()` 已寫好，`NOTES_BROADCAST_GROUP` 尚未填寫，尚待實機測試）
+- [x] 同仁可在 LIFF 輸入姓名/Notes ID + 驗證碼完成驗證，Firestore 正確寫入 `lineAuth` 為 verified（真實 LINE 帳號實測成功）
+- [ ] 驗證碼錯誤時不會誤判成功，且連續錯誤達上限會被鎖定（`codeAttempts`）——「不會誤判成功」已間接驗證（單元測試 + 正式環境用錯誤碼測試皆正確拒絕），但「連續錯誤達上限鎖定」這段 transaction 邏輯還沒拿真實 Firestore 測過，需要一個尚未驗證過的 LINE 身分才能測，見 §10
+- [ ] 驗證碼過期後輸入會被拒絕並提示重新取得最新碼（邏輯已寫，尚未實測）
+- [x] 未驗證的呼叫者打 `/stores` 會被拒絕（實測：沒帶 token 回 401；帶假 token 後端會真的去打 LINE API 驗證後拒絕）——「已撤銷」的情境（§5.7 revoke 後）尚未實測，因為還沒有真實名單可以觸發撤銷
+- [x] `stores.json` 不再是可被直接以網址取得的公開靜態檔案（正式站已刪除，實測回 404；`store/web/index.html` 已切換成附 QR Code 的 LIFF 頁說明頁）
+- [x] Firestore 安全規則已鎖死前端直接寫入 `lineAuth.status` 的能力，僅後端可寫入（`firestore.rules` 已部署，內容為全部拒絕）
+- [ ] 每季名單匯入後，不在名單中的已驗證 LINE userId 會被改為 `revoked`，且 `revoked` 帳號無法再查詢（邏輯已寫，需要真實名單才能實測）
+- [x] 名單匯入時能檢查基本格式（筆數、必要欄位），避免匯入異常名單造成大量誤撤銷（正式環境實測：空名單會被 `admin_import_roster` 擋下，回傳 `blocked: true`）
 
 ## 10. 待確認 / 後續可討論事項
 

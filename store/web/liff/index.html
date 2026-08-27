@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>花蓮慈濟醫院特約商店查詢（同仁專用）</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  /* 這個頁面專屬的樣式，共用樣式都在 ../style.css（sdd3.md 規定不能動那個檔案） */
+  .panel {
+    max-width: 480px;
+    margin: 32px auto;
+    padding: 0 20px;
+  }
+  .panel h2 { color: var(--primary); font-size: 1.1rem; margin: 0 0 10px; }
+  .panel p.hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 20px; }
+  .verify-box {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .verify-box label { display: block; font-size: 0.88rem; color: var(--text); margin: 12px 0 4px; }
+  .verify-box label:first-child { margin-top: 0; }
+  .verify-box input[type=text] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+    color: var(--text);
+  }
+  .verify-box button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .verify-box button:disabled { opacity: 0.6; cursor: default; }
+  .verify-box button:hover:not(:disabled) { background: var(--primary-hover); }
+  .form-msg { margin-top: 12px; font-size: 0.88rem; }
+  .form-msg.error { color: #c0392b; }
+  .form-msg.ok { color: var(--accent); }
+  .center-msg { text-align: center; color: var(--muted); padding: 60px 16px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>花蓮慈濟醫院特約商店查詢</h1>
+    <div class="rule"></div>
+    <div class="subtitle">同仁專用查詢頁</div>
+  </header>
+
+  <div id="loading-view" class="center-msg">載入中…</div>
+
+  <div id="liff-error-view" class="panel" hidden>
+    <div class="center-msg">請透過 LINE App 開啟本頁面。</div>
+  </div>
+
+  <div id="verify-view" class="panel" hidden>
+    <h2>身分驗證</h2>
+    <p class="hint">請輸入您的姓名/Notes ID，以及院內公告信件中的本期驗證碼。</p>
+    <div class="verify-box">
+      <label for="notesId">姓名 / Notes ID</label>
+      <input type="text" id="notesId" placeholder="例：花蓮陳麗玉" autocomplete="off">
+      <label for="code">本期驗證碼</label>
+      <input type="text" id="code" placeholder="院內公告信件中的驗證碼" autocomplete="off">
+      <button id="verify-submit">送出驗證</button>
+      <div id="verify-msg" class="form-msg"></div>
+    </div>
+  </div>
+
+  <div class="controls" id="query-controls" hidden>
+    <input type="text" id="keyword" placeholder="搜尋商店名稱、地址或優惠內容…">
+    <select id="kind"><option value="">全部類別</option></select>
+  </div>
+  <div class="meta" id="meta" hidden></div>
+  <div class="list" id="list"></div>
+  <div class="disclaimer" id="disclaimer" hidden>各特約商店優惠內容，依雙方簽訂合約條款或店家現場公告為準，如有異動請以店家最新公告為主。</div>
+  <footer>
+    <div id="updated"></div>
+    <div>職工福利行政小組</div>
+  </footer>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
+const LIFF_ID = "__LIFF_ID__";
+
+const state = { all: [], keyword: "", kind: "", categoryColors: new Map() };
+
+const CATEGORY_PALETTE = [
+  { accent: "#0345bf", bg: "#e8edfb" },
+  { accent: "#1d8989", bg: "#e3f3f2" },
+  { accent: "#c65a04", bg: "#fdece0" },
+  { accent: "#3c7a3f", bg: "#e7f3e8" },
+  { accent: "#6a4fa0", bg: "#efe9f8" },
+  { accent: "#b0396b", bg: "#fbe8f0" },
+];
+
+const ICON_RULES = [
+  [/餐|飲|小吃|咖啡|茶|美食/, "🍽️"],
+  [/藥|診所|醫療|健康/, "💊"],
+  [/3C|電腦|手機|通訊|3c/, "💻"],
+  [/眼鏡/, "👓"],
+  [/美容|美髮|美甲|spa|SPA|沙龍/, "💇"],
+  [/服飾|精品|鞋|包/, "👕"],
+  [/書|文具/, "📚"],
+  [/運動|健身/, "🏋️"],
+  [/汽車|機車|修車|保養/, "🚗"],
+  [/旅遊|住宿|飯店|民宿/, "🏨"],
+  [/生活|百貨|超市|量販/, "🛒"],
+];
+
+function iconFor(kind) {
+  if (!kind) return "🏬";
+  for (const [re, icon] of ICON_RULES) {
+    if (re.test(kind)) return icon;
+  }
+  return "🏬";
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function formatContents(str) {
+  return escapeHtml(str).replace(/\r\n|\n/g, "<br>");
+}
+
+function show(id) {
+  document.getElementById(id).hidden = false;
+}
+function hide(id) {
+  document.getElementById(id).hidden = true;
+}
+
+function renderStores() {
+  const kw = state.keyword.trim();
+  const list = document.getElementById("list");
+  const meta = document.getElementById("meta");
+
+  if (!kw && !state.kind) {
+    meta.textContent = `共 ${state.all.length} 筆，請輸入關鍵字或選擇類別開始查詢`;
+    list.innerHTML = "";
+    return;
+  }
+
+  const filtered = state.all.filter(s => {
+    if (state.kind && s.kind !== state.kind) return false;
+    if (!kw) return true;
+    const hay = `${s.name} ${s.address} ${s.contents} ${s.tel}`;
+    return hay.includes(kw);
+  });
+
+  meta.textContent = `共 ${filtered.length} 筆（總計 ${state.all.length} 筆）`;
+  list.innerHTML = "";
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">查無符合條件的商店</div>';
+    return;
+  }
+
+  for (const s of filtered) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const color = state.categoryColors.get(s.kind) || CATEGORY_PALETTE[0];
+    card.style.setProperty("--cat-accent", color.accent);
+    card.style.setProperty("--cat-bg", color.bg);
+    card.innerHTML = `
+      <span class="kind"><span class="icon">${iconFor(s.kind)}</span>${escapeHtml(s.kind || "未分類")}</span>
+      <h3>${escapeHtml(s.name)}</h3>
+      <p>📍 ${s.address ? `<a class="address" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}" target="_blank" rel="noopener">${escapeHtml(s.address)}</a>` : ""}</p>
+      <p>📞 ${escapeHtml(s.tel || "")}</p>
+      ${s.contents ? `<div class="offer">🎁 ${formatContents(s.contents)}</div>` : ""}
+      <div class="expire">優惠期限：${s.expire ? s.expire.replaceAll("-", "/") : "長期"}</div>
+    `;
+    list.appendChild(card);
+  }
+}
+
+function showQueryView(data) {
+  hide("loading-view");
+  hide("verify-view");
+  state.all = data.stores || [];
+
+  if (data.generated_at) {
+    document.getElementById("updated").textContent = `資料更新時間：${data.generated_at.replace("T", " ")}`;
+  }
+
+  const kinds = [...new Set(state.all.map(s => s.kind).filter(Boolean))].sort();
+  kinds.forEach((k, i) => state.categoryColors.set(k, CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]));
+
+  const kindSelect = document.getElementById("kind");
+  kindSelect.innerHTML = '<option value="">全部類別</option>';
+  for (const k of kinds) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k;
+    kindSelect.appendChild(opt);
+  }
+
+  show("query-controls");
+  show("meta");
+  show("disclaimer");
+  renderStores();
+}
+
+async function fetchStores() {
+  const idToken = liff.getIDToken();
+  const res = await fetch(`${FUNCTIONS_BASE_URL}/stores`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function tryLoadStores() {
+  const data = await fetchStores();
+  if (data) {
+    showQueryView(data);
+  } else {
+    hide("loading-view");
+    show("verify-view");
+  }
+}
+
+async function submitVerify() {
+  const notesId = document.getElementById("notesId").value.trim();
+  const code = document.getElementById("code").value.trim();
+  const msg = document.getElementById("verify-msg");
+  const btn = document.getElementById("verify-submit");
+
+  if (!notesId || !code) {
+    msg.textContent = "請輸入姓名/Notes ID 與驗證碼";
+    msg.className = "form-msg error";
+    return;
+  }
+
+  btn.disabled = true;
+  msg.textContent = "驗證中…";
+  msg.className = "form-msg";
+
+  try {
+    const idToken = liff.getIDToken();
+    if (!idToken) {
+      msg.textContent = "拿不到 LINE 登入憑證（idToken 是空的），請確認 LIFF 有開啟 openid scope，或重新開啟本頁。";
+      msg.className = "form-msg error";
+      btn.disabled = false;
+      return;
+    }
+
+    const res = await fetch(`${FUNCTIONS_BASE_URL}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken, notesId, code }),
+    });
+    let body;
+    try {
+      body = await res.json();
+    } catch (e) {
+      body = null;
+    }
+
+    if (body && body.ok) {
+      msg.textContent = "驗證成功，載入查詢頁中…";
+      msg.className = "form-msg ok";
+      await tryLoadStores();
+    } else if (body && body.locked) {
+      msg.textContent = "已連續輸入錯誤過多次，請稍後再試。";
+      msg.className = "form-msg error";
+    } else if (res.status === 401 && body && body.error === "invalid_id_token") {
+      msg.textContent = "LINE 登入驗證失敗（invalid_id_token），不是驗證碼的問題，請重新登入 LINE 再試一次。";
+      msg.className = "form-msg error";
+    } else {
+      const detail = body && body.error ? body.error : `HTTP ${res.status}`;
+      msg.textContent = `姓名/Notes ID 或驗證碼不正確，請確認後再試一次。（除錯代碼：${detail}）`;
+      msg.className = "form-msg error";
+    }
+  } catch (err) {
+    msg.textContent = `連線失敗，請稍後再試。（${err.message || err}）`;
+    msg.className = "form-msg error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("verify-submit").addEventListener("click", submitVerify);
+document.getElementById("keyword").addEventListener("input", e => {
+  state.keyword = e.target.value;
+  renderStores();
+});
+document.getElementById("kind").addEventListener("change", e => {
+  state.kind = e.target.value;
+  renderStores();
+});
+
+liff.init({ liffId: LIFF_ID })
+  .then(() => {
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    tryLoadStores();
+  })
+  .catch(() => {
+    hide("loading-view");
+    show("liff-error-view");
+  });
+</script>
+</body>
+</html>

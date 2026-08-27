@@ -59,3 +59,27 @@ def fetch_active_stores():
 
     stores.sort(key=lambda s: (s["kind"], s["name"]))
     return stores
+
+
+def send_broadcast_mail(subject: str, body: str, group_recipient: str):
+    """
+    透過福委會共用 Notes 帳號寄送院內群組信（sdd3.md §5.3、§5.6）。
+
+    沿用 fetch_active_stores() 一樣的 Lotus.NotesSession 連線寫法。GetDatabase("", "")
+    開啟目前這組 Notes ID 對應的預設郵件檔——Send() 是否成功繫於這組帳號本身有沒有
+    寄信權限，跟被開啟的是哪個資料庫無關，這點 sdd3.md §5.6 已確認可行，但用 COM API
+    程式化觸發寄送這個動作本身還沒有實機測試過，第一次呼叫時要留意。
+
+    group_recipient: 院內同仁群組信箱位址（.env 的 NOTES_BROADCAST_GROUP）
+    """
+    notes = win32com.client.Dispatch("Lotus.NotesSession")
+    notes.Initialize(os.getenv("NOTES_PASSWORD", ""))
+    db = notes.GetDatabase("", "")
+
+    doc = db.CreateDocument()
+    doc.Form = "Memo"
+    doc.SendTo = group_recipient
+    doc.Subject = subject
+    rt = doc.CreateRichTextItem("Body")
+    rt.AppendText(body)
+    doc.Send(False)

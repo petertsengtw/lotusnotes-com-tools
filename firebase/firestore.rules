@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// 全部拒絕：這個專案唯一會碰 Firestore 的地方是 Cloud Functions（Admin SDK），
+// Admin SDK 本來就會略過這裡的規則，所以這份規則不是實際擋存取的機制本身，
+// 是防呆用的最後一道防線——避免未來不小心讓前端直接掛上 Firestore SDK。
+// 見 sdd3.md §5.5。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

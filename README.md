@@ -225,13 +225,15 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 
 ## 功能四：特約商店查詢頁（`store/`）
 
-從 `ContributingStore.nsf` 匯出未作廢、未過期的特約商店清單，部署成一個給院內同仁用手機查詢的靜態網頁（放在 Joomla 網站的子目錄下，無需登入密碼，只要知道網址即可查詢）。
+從 `ContributingStore.nsf` 匯出未作廢、未過期的特約商店清單，部署成一個給院內同仁用手機查詢的網頁。**查詢頁已上線存取控制**（見下方「特約商店查詢頁存取控制」）：`store/web/index.html` 現在是一個說明頁面，附上 LIFF 驗證查詢頁的 QR Code 跟連結，實際查詢資料只能透過 LINE 登入 + 驗證碼綁定後取得。
+
+> **`store/deploy_store.py` 平常不要再執行**：這支腳本會把 `stores.json`（完整店家資料）跟其他靜態頁面一起 scp 到正式站，一旦跑了就會讓 `stores.json` 重新變成任何人都能直接用網址抓取的公開檔案，等於繞過剛做好的存取控制。目前只保留這支腳本的原始碼與說明供參考／未來需要時查閱，日常更新特約商店清單一律改用下面的 `sync_stores_to_firestore.py`。若真的需要重跑 `deploy_store.py`（例如要更新 `join.html`/`qa.html`/`style.css` 這些靜態頁），跑完務必手動把正式站上的 `stores.json` 刪掉。
 
 ```powershell
 venv32\Scripts\python.exe store\deploy_store.py
 ```
 
-流程：匯出最新 `store/output/stores.json` → 透過 SSH 金鑰用 `scp` 把 `store/web/`（`index.html` 特約查詢、`join.html` 加入特約、`qa.html` 常見問題、`style.css` 共用樣式）與 `stores.json` 上傳到 Ubuntu 網站伺服器的 `STORE_REMOTE_PATH`。
+流程：匯出最新 `store/output/stores.json` → 透過 SSH 金鑰用 `scp` 把 `store/web/`（`index.html`、`join.html` 加入特約、`qa.html` 常見問題、`style.css` 共用樣式）與 `stores.json` 上傳到 Ubuntu 網站伺服器的 `STORE_REMOTE_PATH`。
 
 **這支腳本目前必須手動執行**（不走排程）：因為這台機器的 Notes ID 沒有開放「允許其他 Notes 程式使用此密碼」，`Initialize()` 會跳出互動式密碼輸入視窗，需要在畫面上手動輸入密碼才能繼續，無法無人值守跑排程。之後如果想改成排程，要先在 Notes 用戶端的 **File → Security → User Security** 把該選項打開。
 
@@ -249,7 +251,50 @@ STORE_REMOTE_PATH=/var/www/html/store
 
 **為什麼用 SSH 金鑰而不是 `paramiko`？** 這台機器是 Python 3.14（32-bit），`paramiko` 依賴的 `cryptography` 目前在 PyPI 上還沒有 cp314-win32 的預編譯 wheel，會退回原始碼建置並卡在院內網路的 SSL 憑證攔截。改用 Windows 內建的 OpenSSH 用戶端（`ssh.exe` / `scp.exe`）不用額外裝套件，也剛好符合排程需要非互動式登入（金鑰）的需求。
 
-**查詢頁目前沒有存取控制**：資料本身是店家自願提供給同仁的優惠，敏感度低，所以刻意不加密碼關卡，只靠網址不公開。之後如果要加驗證，比起自建帳密系統，建議優先考慮 Joomla 既有的登入機制。
+### 特約商店查詢頁存取控制（已上線）
+
+完整設計見 `sdd3.md` §5。同仁掃 LINE@ QR code 加好友、在 LIFF 頁輸入姓名/Notes ID + 院內公告信件裡的本期驗證碼完成綁定，之後查詢優惠都透過這個 LINE@ 進行，不用重複驗證。後端是 Cloud Functions（Python）+ Firestore（專案 `hlwelfare`），本機這台機器完全不持有 Firebase 憑證，只用共用密鑰打 Cloud Functions 的 admin 端點——見 `firebase/` 目錄與下方新增的工具腳本。
+
+已完成並實測：Cloud Functions 五支端點（`verify`／`stores`／`admin_push_stores`／`admin_rotate_code`／`admin_import_roster`）部署上線、`store/web/liff/index.html` 部署上線、真實 LINE 帳號走完「加好友 → 輸入姓名+驗證碼 → 查詢」全流程、`store/web/index.html` 正式切換成 QR Code 說明頁（連到 LIFF 頁）、正式站殘留的公開 `stores.json` 已刪除。
+
+**重新部署 Cloud Functions（改程式碼後才需要）：**
+
+```powershell
+cd firebase
+firebase deploy --only functions
+```
+
+如果改到 `firestore.rules`/`firestore.indexes.json`，記得加上 `firestore:rules,firestore:indexes`。secrets（`ADMIN_SHARED_SECRET`、`LINE_LOGIN_CHANNEL_ID`）已經設定在 Cloud Functions 那端，改密鑰才需要重跑 `firebase functions:secrets:set`。
+
+**`.env` 欄位（本機腳本用，不含任何 Firebase 憑證）：**
+
+```
+STORE_AUTH_FUNCTIONS_BASE_URL=https://us-central1-hlwelfare.cloudfunctions.net
+ADMIN_SHARED_SECRET=（要跟 Cloud Functions 那端 ADMIN_SHARED_SECRET secret 的值一致）
+NOTES_BROADCAST_GROUP=（院內同仁群組信箱位址，尚未填寫）
+LIFF_ID=2011285225-tzE9fFFl
+STORE_LIFF_URL=https://liff.line.me/2011285225-tzE9fFFl
+```
+
+**例行操作：**
+
+```powershell
+# 把最新特約商店清單同步到 Firestore（給 LIFF 查詢頁用，取代 deploy_store.py 平常的角色）
+venv32\Scripts\python.exe store\sync_stores_to_firestore.py
+
+# 換一組新的期效性驗證碼，並寄廣播信給院內同仁（季度執行，跟 deploy_store.py 一樣要手動輸入 Notes 密碼；
+# 需要先在 .env 填好 NOTES_BROADCAST_GROUP 才能用）
+venv32\Scripts\python.exe store\broadcast_code.py
+
+# 季度在職名單覆核：先 dry-run 看報告，確認沒問題再加 --commit 真的撤銷
+venv32\Scripts\python.exe store\import_roster.py 名單.csv
+venv32\Scripts\python.exe store\import_roster.py 名單.csv --commit
+
+# 把 LIFF 驗證頁部署到 Ubuntu 主機（改了 store/web/liff/index.html 才需要重跑）
+venv32\Scripts\python.exe store\deploy_liff.py
+```
+
+**尚未完成**（見 `sdd3.md` §9、§10）：連續打錯驗證碼會不會真的鎖定，還沒有拿真實 Firestore 環境測過（需要一個尚未驗證過的 LINE 身分才能測）；`NOTES_BROADCAST_GROUP` 還沒填寫，`broadcast_code.py` 還不能用；季度在職名單真實欄位格式尚未確認。
 
 ---
 
@@ -265,6 +310,10 @@ STORE_REMOTE_PATH=/var/www/html/store
 | `store/query_store.py` | 互動式查詢特約商店，可依類別篩選、選擇性輸出 CSV |
 | `store/export_store_json.py` | 匯出特約商店清單成 `store/output/stores.json`（給查詢頁用） |
 | `store/deploy_store.py` | 匯出 JSON 並透過 SSH 金鑰部署查詢頁到 Ubuntu 網站伺服器 |
+| `store/sync_stores_to_firestore.py` | 把特約商店清單同步到 Firestore，供存取控制上線後的 `/stores` API 使用 |
+| `store/broadcast_code.py` | 換一組新的期效性驗證碼，並寄廣播信給院內同仁群組信箱 |
+| `store/import_roster.py` | 匯入季度在職名單，覆核已驗證的 LINE 使用者是否還在職（預設 dry-run，`--commit` 才真的撤銷） |
+| `store/deploy_liff.py` | 部署 LIFF 驗證查詢頁（`store/web/liff/index.html`）到 Ubuntu 網站伺服器 |
 
 ---
 
