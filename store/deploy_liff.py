@@ -1,5 +1,5 @@
 """
-把 store/web/liff/index.html 部署到 Ubuntu 主機的 {STORE_REMOTE_PATH}/liff/ 子目錄。
+把 store/web/liff/ 底下所有 LIFF 頁面部署到 Ubuntu 主機的 {STORE_REMOTE_PATH}/liff/ 子目錄。
 用法: python deploy_liff.py
 
 跟 deploy_store.py 完全獨立、不共用也不修改它——這支只管 LIFF 驗證頁這一個檔案。
@@ -33,7 +33,8 @@ if not all([SFTP_HOST, SFTP_USER, SFTP_KEY_PATH, STORE_REMOTE_PATH, LIFF_ID, FUN
     )
 
 BASE_DIR    = os.path.dirname(__file__)
-SOURCE_FILE = os.path.join(BASE_DIR, "web", "liff", "index.html")
+LIFF_DIR    = os.path.join(BASE_DIR, "web", "liff")
+PAGES       = ("index.html", "bulletin.html")
 REMOTE_DIR  = f"{STORE_REMOTE_PATH}/liff"
 SSH_TARGET  = f"{SFTP_USER}@{SFTP_HOST}"
 
@@ -51,31 +52,33 @@ def run_ssh(args, check=True):
     return result
 
 
-if not os.path.exists(SOURCE_FILE):
-    raise SystemExit(f"找不到 {SOURCE_FILE}")
+run_ssh([SSH_EXE, "-i", SFTP_KEY_PATH, "-p", SFTP_PORT, *SSH_OPTS, SSH_TARGET, f"mkdir -p {REMOTE_DIR}"])
 
-with open(SOURCE_FILE, "r", encoding="utf-8") as f:
-    html = f.read()
+for page in PAGES:
+    source_file = os.path.join(LIFF_DIR, page)
+    if not os.path.exists(source_file):
+        raise SystemExit(f"找不到 {source_file}")
 
-for placeholder in ("__LIFF_ID__", "__FUNCTIONS_BASE_URL__"):
-    if placeholder not in html:
-        raise SystemExit(f"{SOURCE_FILE} 裡找不到 {placeholder} 佔位字串，請確認檔案內容")
+    with open(source_file, "r", encoding="utf-8") as f:
+        html = f.read()
 
-html = html.replace("__LIFF_ID__", LIFF_ID).replace("__FUNCTIONS_BASE_URL__", FUNCTIONS_BASE_URL)
+    for placeholder in ("__LIFF_ID__", "__FUNCTIONS_BASE_URL__"):
+        if placeholder not in html:
+            raise SystemExit(f"{source_file} 裡找不到 {placeholder} 佔位字串，請確認檔案內容")
 
-with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tmp:
-    tmp.write(html)
-    tmp_path = tmp.name
+    html = html.replace("__LIFF_ID__", LIFF_ID).replace("__FUNCTIONS_BASE_URL__", FUNCTIONS_BASE_URL)
 
-try:
-    run_ssh([SSH_EXE, "-i", SFTP_KEY_PATH, "-p", SFTP_PORT, *SSH_OPTS, SSH_TARGET, f"mkdir -p {REMOTE_DIR}"])
+    with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as tmp:
+        tmp.write(html)
+        tmp_path = tmp.name
 
-    scp_cmd = [SCP_EXE, "-i", SFTP_KEY_PATH, "-P", SFTP_PORT, *SSH_OPTS,
-               tmp_path, f"{SSH_TARGET}:{REMOTE_DIR}/index.html"]
-    result = run_ssh(scp_cmd, check=False)
-    if result.returncode != 0:
-        print(f"上傳失敗，重試一次...\n{result.stderr}")
-        run_ssh(scp_cmd)
-    print(f"已部署到 {REMOTE_DIR}/index.html")
-finally:
-    os.remove(tmp_path)
+    try:
+        scp_cmd = [SCP_EXE, "-i", SFTP_KEY_PATH, "-P", SFTP_PORT, *SSH_OPTS,
+                   tmp_path, f"{SSH_TARGET}:{REMOTE_DIR}/{page}"]
+        result = run_ssh(scp_cmd, check=False)
+        if result.returncode != 0:
+            print(f"上傳 {page} 失敗，重試一次...\n{result.stderr}")
+            run_ssh(scp_cmd)
+        print(f"已部署到 {REMOTE_DIR}/{page}")
+    finally:
+        os.remove(tmp_path)

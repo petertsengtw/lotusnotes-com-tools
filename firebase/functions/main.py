@@ -4,20 +4,22 @@ Cloud Functions（2nd gen, Python）進入點。sdd3.md §5 存取控制的後�
 每個 @https_fn.on_request 是各自獨立網址的 function（不是同一支底下的路由）：
   verify               公開，LIFF 頁呼叫，輸入姓名/Notes ID + 驗證碼
   stores                公開，LIFF 頁呼叫，帶 LINE ID token 取商店清單
+  bulletin              公開，LIFF 頁呼叫，帶 LINE ID token 取福利公告（sdd4.md）
   admin_push_stores    admin-only，本機 sync_stores_to_firestore.py 呼叫
   admin_rotate_code    admin-only，本機 broadcast_code.py 呼叫
   admin_import_roster  admin-only，本機 import_roster.py 呼叫
 
 安全模型（見 sdd3.md §5 實作計畫「架構總覽」）：
 - 這裡是唯一會碰 Firestore 的地方，前端/本機都不直接用 Firestore SDK。
-- /verify、/stores 給瀏覽器（LIFF webview）呼叫，需要 CORS；/admin/* 只給本機腳本
-  用 requests 打，不會有瀏覽器呼叫，不需要 CORS。
+- /verify、/stores、/bulletin 給瀏覽器（LIFF webview）呼叫，需要 CORS；/admin/* 只給
+  本機腳本用 requests 打，不會有瀏覽器呼叫，不需要 CORS。
 """
 from __future__ import annotations
 
 import json
 import os
 
+import requests
 from firebase_admin import firestore, initialize_app
 from firebase_functions import https_fn, options
 
@@ -42,6 +44,30 @@ def _json_response(payload: dict, status: int = 200) -> https_fn.Response:
 
 def _db():
     return firestore.client()
+
+
+def _require_verified_user(req: https_fn.Request):
+    """
+    共用的「這個呼叫者是誰、驗證過了嗎」檢查，/stores、/bulletin 都要用一樣的邏輯，
+    避免各自重寫一份、之後改壞其中一個沒同步改到另一個。
+
+    回傳 (line_user_id, None) 表示通過；(None, error_response) 表示要直接回傳這個錯誤。
+    """
+    auth_header = req.headers.get("Authorization", "")
+    id_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+
+    try:
+        claims = verify_line_id_token(id_token)
+    except LineVerifyError as e:
+        print(f"{req.path}: LINE token rejected: {e}")
+        return None, _json_response({"ok": False, "error": "invalid_id_token"}, 401)
+
+    line_user_id = claims["sub"]
+    auth_doc = _db().collection("lineAuth").document(line_user_id).get()
+    if not auth_doc.exists or auth_doc.to_dict().get("status") != "verified":
+        return None, _json_response({"ok": False, "error": "not_verified"}, 403)
+
+    return line_user_id, None
 
 
 @https_fn.on_request(cors=_PUBLIC_CORS, secrets=["LINE_LOGIN_CHANNEL_ID"])
@@ -70,23 +96,47 @@ def verify(req: https_fn.Request) -> https_fn.Response:
 
 @https_fn.on_request(cors=_PUBLIC_CORS, secrets=["LINE_LOGIN_CHANNEL_ID"])
 def stores(req: https_fn.Request) -> https_fn.Response:
-    auth_header = req.headers.get("Authorization", "")
-    id_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+    _, error = _require_verified_user(req)
+    if error:
+        return error
 
-    try:
-        claims = verify_line_id_token(id_token)
-    except LineVerifyError as e:
-        print(f"stores: LINE token rejected: {e}")
-        return _json_response({"ok": False, "error": "invalid_id_token"}, 401)
-
-    db = _db()
-    auth_doc = db.collection("lineAuth").document(claims["sub"]).get()
-    if not auth_doc.exists or auth_doc.to_dict().get("status") != "verified":
-        return _json_response({"ok": False, "error": "not_verified"}, 403)
-
-    data_doc = db.collection("storeData").document("current").get()
+    data_doc = _db().collection("storeData").document("current").get()
     payload = data_doc.to_dict() if data_doc.exists else {"generated_at": None, "stores": []}
     return _json_response(payload)
+
+
+@https_fn.on_request(cors=_PUBLIC_CORS, secrets=["LINE_LOGIN_CHANNEL_ID", "BULLETIN_SECRET_SLUG"])
+def bulletin(req: https_fn.Request) -> https_fn.Response:
+    """
+    福利公告查詢（sdd4.md）。公告資料不存 Firestore，存在 Ubuntu 網站伺服器一個沒有
+    任何頁面連結、路徑是亂碼的目錄下——這裡驗證身分通過後才代替呼叫者去抓那個網址，
+    瀏覽器/LIFF 頁本身永遠不知道那個網址，見 bulletin/deploy_bulletin.py。
+    """
+    _, error = _require_verified_user(req)
+    if error:
+        return error
+
+    base_url = os.environ.get("BULLETIN_BASE_URL", "").rstrip("/")
+    slug = os.environ.get("BULLETIN_SECRET_SLUG", "")
+    if not base_url or not slug:
+        return _json_response({"ok": False, "error": "server_misconfigured"}, 500)
+
+    try:
+        resp = requests.get(f"{base_url}/{slug}/bulletin.json", timeout=10)
+    except requests.RequestException as e:
+        print(f"bulletin: upstream fetch failed: {e}")
+        return _json_response({"ok": False, "error": "upstream_error"}, 502)
+
+    if resp.status_code != 200:
+        print(f"bulletin: upstream returned {resp.status_code}")
+        return _json_response({"ok": False, "error": "upstream_error"}, 502)
+
+    data = resp.json()
+    image_base = f"{base_url}/{slug}/images"
+    for b in data.get("bulletins", []):
+        b["images"] = [f"{image_base}/{name}" for name in b.get("images", [])]
+
+    return _json_response(data)
 
 
 @https_fn.on_request(secrets=["ADMIN_SHARED_SECRET"])

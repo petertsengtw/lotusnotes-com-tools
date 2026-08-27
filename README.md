@@ -1,11 +1,12 @@
 # autowork-lotusNotesCOM - Lotus Notes 自動化工具
 
-透過 Lotus Notes COM API 操作院內 Notes 資料庫的自動化工具集，目前有四項功能：
+透過 Lotus Notes COM API 操作院內 Notes 資料庫的自動化工具集，目前有五項功能：
 
 - **功能一・打卡**：執行簽到/簽退，過程中順便完成院內 Portal 上網認證，並用 LINE 推播打卡結果通知。
 - **功能二・新聞稿擷取**：從 Notes 資料庫擷取新聞稿內容與圖片，存到本機
 - **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章
 - **功能四・特約商店查詢頁**：從 Notes 資料庫匯出特約商店優惠清單，部署成一個**限本院同仁使用**的查詢頁；同仁透過 LINE 官方帳號（LINE@）加好友、在 LIFF 頁完成身分綁定驗證後即可查詢，後端為 Firebase Cloud Functions + Firestore
+- **功能五・福利公告查詢**：從院內公佈欄匯出職工福利行政小組發布的公告（含圖片），部署成另一個限本院同仁使用的查詢頁，跟功能四共用同一套 LINE 身分驗證，但公告資料存在 Ubuntu 網站伺服器，不進 Firebase
 
 各功能的詳細說明見下方對應章節。
 
@@ -328,6 +329,25 @@ venv32\Scripts\python.exe store\deploy_liff.py
 
 ---
 
+## 功能五：福利公告查詢（`bulletin/`）
+
+從院內公佈欄（`mdabulletin.nsf`）匯出「職工福利行政小組」發布、尚未過期的公告（含內嵌圖片），部署一個限本院同仁使用的查詢頁。跟特約商店查詢頁共用同一套 LINE@ + LIFF 身分驗證（sdd3.md §5），但公告資料**不進 Firebase**，存在 Ubuntu 網站伺服器一個沒有任何頁面連結、路徑是亂碼的目錄下——Cloud Functions 的 `bulletin` 端點驗證身分通過後才代替使用者去抓那個網址，詳見 `sdd4.md`。
+
+```powershell
+venv32\Scripts\python.exe bulletin\deploy_bulletin.py
+venv32\Scripts\python.exe store\deploy_liff.py
+```
+
+**`.env` 新增欄位：**
+
+```
+BULLETIN_SECRET_SLUG=（存取控制用的隨機路徑，本機跟 Cloud Functions 的 secret 要一致）
+```
+
+**圖文選單設定注意事項**：「福利公告查詢」按鈕**不能**用 `https://liff.line.me/{LIFF_ID}` 這個短網址（一個 LIFF ID 只對應一個固定 Endpoint URL，目前指向特約商店查詢頁），要直接連到完整網址 `https://hlm.tzuchi.com.tw/store/liff/bulletin.html`，同一組 LIFF ID 的登入驗證一樣能用，不用另外申請新的 LIFF app。
+
+---
+
 ## 工具腳本
 
 | 檔案 | 說明 |
@@ -343,7 +363,10 @@ venv32\Scripts\python.exe store\deploy_liff.py
 | `store/sync_stores_to_firestore.py` | 把特約商店清單同步到 Firestore，供存取控制上線後的 `/stores` API 使用 |
 | `store/broadcast_code.py` | 換一組新的期效性驗證碼並印出來，供人工張貼到院內公佈欄；不同部門/情境各自獨立換碼 |
 | `store/import_roster.py` | 匯入季度在職名單，覆核已驗證的 LINE 使用者是否還在職（預設 dry-run，`--commit` 才真的撤銷） |
-| `store/deploy_liff.py` | 部署 LIFF 驗證查詢頁（`store/web/liff/index.html`）到 Ubuntu 網站伺服器 |
+| `store/deploy_liff.py` | 部署 `store/web/liff/` 底下所有 LIFF 頁面（`index.html`、`bulletin.html`）到 Ubuntu 網站伺服器 |
+| `bulletin/inspect_bulletin.py` | 列出 mdabulletin.nsf 公佈欄的 View，並找「職工福利行政小組」發的公告欄位（維護用） |
+| `bulletin/notes_bulletin.py` | 共用模組：讀取「職工福利行政小組」未過期的公告，含內嵌圖片擷取 |
+| `bulletin/deploy_bulletin.py` | 匯出公告 JSON + 圖片，透過 SSH 金鑰部署到 Ubuntu 網站伺服器（見「功能五」） |
 
 ---
 

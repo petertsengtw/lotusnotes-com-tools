@@ -6,6 +6,7 @@ __pycache__/
 checkin.log
 holidays.txt
 store/output/
+bulletin/output/
 .pytest_cache/
 firebase/*-debug.log
 firebase/.firebase/

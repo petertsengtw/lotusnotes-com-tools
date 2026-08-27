@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>花蓮慈濟醫院福利公告查詢（同仁專用）</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  /* 這個頁面專屬的樣式，共用樣式都在 ../style.css（sdd3.md 規定不能動那個檔案） */
+  .panel {
+    max-width: 480px;
+    margin: 32px auto;
+    padding: 0 20px;
+  }
+  .panel h2 { color: var(--primary); font-size: 1.1rem; margin: 0 0 10px; }
+  .panel p.hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 20px; }
+  .verify-box {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .verify-box label { display: block; font-size: 0.88rem; color: var(--text); margin: 12px 0 4px; }
+  .verify-box label:first-child { margin-top: 0; }
+  .verify-box input[type=text] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+    color: var(--text);
+  }
+  .verify-box button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .verify-box button:disabled { opacity: 0.6; cursor: default; }
+  .verify-box button:hover:not(:disabled) { background: var(--primary-hover); }
+  .form-msg { margin-top: 12px; font-size: 0.88rem; }
+  .form-msg.error { color: #c0392b; }
+  .form-msg.ok { color: var(--accent); }
+  .center-msg { text-align: center; color: var(--muted); padding: 60px 16px; }
+  [hidden] { display: none !important; }
+
+  .bulletin-list {
+    max-width: 720px;
+    margin: 0 auto 40px;
+    padding: 0 16px;
+    display: grid;
+    gap: 12px;
+  }
+  .bulletin-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+  }
+  .bulletin-card .summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .bulletin-card h3 { margin: 0; font-size: 1.02rem; color: var(--text); }
+  .bulletin-card .meta { color: var(--muted); font-size: 0.8rem; margin: 4px 0 0; }
+  .bulletin-card .chevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    transition: transform 0.2s;
+  }
+  .bulletin-card.open .chevron { transform: rotate(180deg); }
+  .bulletin-card .detail {
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .bulletin-card .content { white-space: pre-wrap; font-size: 0.92rem; color: var(--text); line-height: 1.6; }
+  .bulletin-card .attachments {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: var(--primary-light);
+    color: var(--primary);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    border-radius: 8px;
+  }
+  .bulletin-card .images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .bulletin-card .images img {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>花蓮慈濟醫院福利公告查詢</h1>
+    <div class="rule"></div>
+    <div class="subtitle">同仁專用查詢頁</div>
+  </header>
+
+  <div id="loading-view" class="center-msg">載入中…</div>
+
+  <div id="liff-error-view" class="panel" hidden>
+    <div class="center-msg">請透過 LINE App 開啟本頁面。</div>
+  </div>
+
+  <div id="verify-view" class="panel" hidden>
+    <h2>身分驗證</h2>
+    <p class="hint">請輸入您的姓名/Notes ID，以及院內公佈欄公告裡的本期驗證碼。</p>
+    <div class="verify-box">
+      <label for="notesId">姓名 / Notes ID</label>
+      <input type="text" id="notesId" placeholder="例：花蓮陳麗玉" autocomplete="off">
+      <label for="code">本期驗證碼</label>
+      <input type="text" id="code" placeholder="院內公佈欄公告中的驗證碼" autocomplete="off">
+      <button id="verify-submit">送出驗證</button>
+      <div id="verify-msg" class="form-msg"></div>
+    </div>
+  </div>
+
+  <div class="meta" id="meta" hidden style="max-width:720px;margin:0 auto 8px;padding:0 16px;color:var(--muted);font-size:0.9rem;"></div>
+  <div class="bulletin-list" id="list"></div>
+
+  <footer>
+    <div id="updated"></div>
+    <div>職工福利行政小組</div>
+  </footer>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
+const LIFF_ID = "__LIFF_ID__";
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function show(id) {
+  document.getElementById(id).hidden = false;
+}
+function hide(id) {
+  document.getElementById(id).hidden = true;
+}
+
+function renderBulletins(bulletins) {
+  const list = document.getElementById("list");
+  const meta = document.getElementById("meta");
+  meta.textContent = `共 ${bulletins.length} 則公告`;
+  list.innerHTML = "";
+
+  if (bulletins.length === 0) {
+    list.innerHTML = '<div class="empty">目前沒有公告</div>';
+    return;
+  }
+
+  for (const b of bulletins) {
+    const card = document.createElement("div");
+    card.className = "bulletin-card";
+    const images = (b.images || [])
+      .map(url => `<img src="${escapeHtml(url)}" loading="lazy" alt="">`)
+      .join("");
+    const attachments = (b.attachments || []).map(name => escapeHtml(name)).join("、");
+    card.innerHTML = `
+      <div class="summary">
+        <div>
+          <h3>${escapeHtml(b.subject || "")}</h3>
+          <div class="meta">公告日期：${b.date ? b.date.replaceAll("-", "/") : ""}　效期至：${b.expire ? b.expire.replaceAll("-", "/") : "長期"}</div>
+        </div>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="detail" hidden>
+        <div class="content">${escapeHtml(b.content || "")}</div>
+        ${images ? `<div class="images">${images}</div>` : ""}
+        ${attachments ? `<div class="attachments">📎 本則公告有附件：${attachments}，如需下載請至院內公佈欄查看原文。</div>` : ""}
+      </div>
+    `;
+    const detail = card.querySelector(".detail");
+    card.querySelector(".summary").addEventListener("click", () => {
+      const isOpen = card.classList.toggle("open");
+      detail.hidden = !isOpen;
+    });
+    list.appendChild(card);
+  }
+}
+
+function showBulletinView(data) {
+  hide("loading-view");
+  hide("verify-view");
+
+  if (data.generated_at) {
+    document.getElementById("updated").textContent = `資料更新時間：${data.generated_at.replace("T", " ")}`;
+  }
+
+  show("meta");
+  renderBulletins(data.bulletins || []);
+}
+
+async function fetchBulletins() {
+  const idToken = liff.getIDToken();
+  const res = await fetch(`${FUNCTIONS_BASE_URL}/bulletin`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function tryLoadBulletins() {
+  const data = await fetchBulletins();
+  if (data) {
+    showBulletinView(data);
+  } else {
+    hide("loading-view");
+    show("verify-view");
+  }
+}
+
+async function submitVerify() {
+  const notesId = document.getElementById("notesId").value.trim();
+  const code = document.getElementById("code").value.trim();
+  const msg = document.getElementById("verify-msg");
+  const btn = document.getElementById("verify-submit");
+
+  if (!notesId || !code) {
+    msg.textContent = "請輸入姓名/Notes ID 與驗證碼";
+    msg.className = "form-msg error";
+    return;
+  }
+
+  btn.disabled = true;
+  msg.textContent = "驗證中…";
+  msg.className = "form-msg";
+
+  try {
+    const idToken = liff.getIDToken();
+    if (!idToken) {
+      msg.textContent = "拿不到 LINE 登入憑證（idToken 是空的），請確認 LIFF 有開啟 openid scope，或重新開啟本頁。";
+      msg.className = "form-msg error";
+      btn.disabled = false;
+      return;
+    }
+
+    const res = await fetch(`${FUNCTIONS_BASE_URL}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken, notesId, code }),
+    });
+    let body;
+    try {
+      body = await res.json();
+    } catch (e) {
+      body = null;
+    }
+
+    if (body && body.ok) {
+      msg.textContent = "驗證成功，載入公告中…";
+      msg.className = "form-msg ok";
+      await tryLoadBulletins();
+    } else if (body && body.locked) {
+      msg.textContent = "已連續輸入錯誤過多次，請稍後再試。";
+      msg.className = "form-msg error";
+    } else if (res.status === 401 && body && body.error === "invalid_id_token") {
+      msg.textContent = "LINE 登入驗證失敗（invalid_id_token），不是驗證碼的問題，請重新登入 LINE 再試一次。";
+      msg.className = "form-msg error";
+    } else {
+      const detail = body && body.error ? body.error : `HTTP ${res.status}`;
+      msg.textContent = `姓名/Notes ID 或驗證碼不正確，請確認後再試一次。（除錯代碼：${detail}）`;
+      msg.className = "form-msg error";
+    }
+  } catch (err) {
+    msg.textContent = `連線失敗，請稍後再試。（${err.message || err}）`;
+    msg.className = "form-msg error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("verify-submit").addEventListener("click", submitVerify);
+
+liff.init({ liffId: LIFF_ID })
+  .then(() => {
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    tryLoadBulletins();
+  })
+  .catch(() => {
+    hide("loading-view");
+    show("liff-error-view");
+  });
+</script>
+</body>
+</html>
