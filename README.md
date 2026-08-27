@@ -1,7 +1,13 @@
 # autowork-lotusNotesCOM - Lotus Notes 自動化工具
 
-自動打卡、院內 Portal 上網認證、LINE 通知、新聞稿擷取與上傳工具。  
-透過 Lotus Notes COM API 操作 Notes 資料庫，並支援將新聞稿上傳至 Joomla 4 網站。
+透過 Lotus Notes COM API 操作院內 Notes 資料庫的自動化工具集，目前有四項功能：
+
+- **功能一・打卡**：執行簽到/簽退，過程中順便完成院內 Portal 上網認證，並用 LINE 推播打卡結果通知。
+- **功能二・新聞稿擷取**：從 Notes 資料庫擷取新聞稿內容與圖片，存到本機
+- **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章
+- **功能四・特約商店查詢頁**：從 Notes 資料庫匯出特約商店優惠清單，部署成一個**限本院同仁使用**的查詢頁；同仁透過 LINE 官方帳號（LINE@）加好友、在 LIFF 頁完成身分綁定驗證後即可查詢，後端為 Firebase Cloud Functions + Firestore
+
+各功能的詳細說明見下方對應章節。
 
 ---
 
@@ -37,13 +43,36 @@ flowchart TD
     S --> T[Joomla 4 REST API]
     T --> U([官網草稿文章])
 
-    %% 特約商店查詢頁流程
-    V([手動執行]) --> W[deploy_store.py]
+    %% 特約商店說明頁部署（join.html/qa.html/style.css 等靜態頁，平常不執行）
+    V([手動執行\n平常不要跑]) --> W[deploy_store.py]
     W --> X[Lotus Notes COM API]
     X --> Y[(ContributingStore.nsf\n特約商店資料庫)]
     Y --> Z[匯出 store/output/stores.json]
     Z --> AA[SSH 金鑰 + scp 上傳]
-    AA --> AB([Ubuntu 網站伺服器\nstore/web/ 查詢頁])
+    AA --> AB([Ubuntu 網站伺服器\nstore/web/index.html\nQR Code 說明頁])
+
+    %% 特約商店資料同步到 Firestore（日常更新資料改用這支）
+    AC([手動執行]) --> AD[sync_stores_to_firestore.py]
+    AD --> X
+    AD --> AE[Cloud Functions\nadmin_push_stores]
+    AE --> AF[(Firestore\nstoreData)]
+
+    %% 同仁查詢：LINE@ + LIFF 身分驗證
+    AB -. 掃 QR Code / 點連結 .-> AG([LIFF 驗證查詢頁\nstore/web/liff/])
+    AG --> AH{已完成驗證?}
+    AH -- 否，首次使用 --> AI[輸入姓名/Notes ID\n+ 本期驗證碼]
+    AI --> AJ[Cloud Functions\nverify]
+    AJ --> AK[(Firestore\nlineAuth / verificationCodes\n/ codeAttempts)]
+    AH -- 是 --> AL[Cloud Functions\nstores]
+    AL --> AF
+    AL --> AG
+
+    %% 期效性驗證碼換發與廣播
+    AM([季度手動執行]) --> AN[broadcast_code.py]
+    AN --> AO[Cloud Functions\nadmin_rotate_code]
+    AO --> AK
+    AN --> AP[Lotus Notes COM API\nsend_broadcast_mail]
+    AP --> AQ([院內同仁群組信\nLINE@ QR Code + 本期驗證碼])
 ```
 
 ---
@@ -95,7 +124,7 @@ LINE_USER_ID=你的line_user_id
 
 ---
 
-## 功能一：自動打卡（`auto_checkin.py`）
+## 功能一：打卡（`auto_checkin.py`）
 
 執行流程：
 1. **Lotus Notes 簽到／退** — 寫入 `hmsign.nsf`
