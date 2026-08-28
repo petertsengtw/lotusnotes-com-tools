@@ -346,6 +346,12 @@ BULLETIN_SECRET_SLUG=（存取控制用的隨機路徑，本機跟 Cloud Functio
 
 **圖文選單設定注意事項**：「福利公告查詢」按鈕**不能**用 `https://liff.line.me/{LIFF_ID}` 這個短網址（一個 LIFF ID 只對應一個固定 Endpoint URL，目前指向特約商店查詢頁），要直接連到完整網址 `https://hlm.tzuchi.com.tw/store/liff/bulletin.html`，同一組 LIFF ID 的登入驗證一樣能用，不用另外申請新的 LIFF app。
 
+**同時同步特約商店 + 福利公告**：Lotus 資料兩邊都更新完，不想分兩次下指令的話可以用根目錄的 `sync_all.py`，一次跑完 `store/sync_stores_to_firestore.py` + `bulletin/deploy_bulletin.py`：
+
+```powershell
+venv32\Scripts\python.exe sync_all.py
+```
+
 ---
 
 ## 工具腳本
@@ -367,6 +373,7 @@ BULLETIN_SECRET_SLUG=（存取控制用的隨機路徑，本機跟 Cloud Functio
 | `bulletin/inspect_bulletin.py` | 列出 mdabulletin.nsf 公佈欄的 View，並找「職工福利行政小組」發的公告欄位（維護用） |
 | `bulletin/notes_bulletin.py` | 共用模組：讀取「職工福利行政小組」未過期的公告，含內嵌圖片擷取 |
 | `bulletin/deploy_bulletin.py` | 匯出公告 JSON + 圖片，透過 SSH 金鑰部署到 Ubuntu 網站伺服器（見「功能五」） |
+| `sync_all.py` | 一次跑完 `store/sync_stores_to_firestore.py` + `bulletin/deploy_bulletin.py`，Lotus 資料更新後的日常同步用這支就好 |
 
 ---
 
