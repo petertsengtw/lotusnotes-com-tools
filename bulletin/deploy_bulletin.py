@@ -72,8 +72,10 @@ with open(JSON_PATH, "w", encoding="utf-8") as f:
 print(f"已匯出 {len(bulletins)} 則公告")
 
 # ── 部署 ──────────────────────────────────────────
+# 先清空遠端 images 目錄再重建：公告過期後圖片就不會再進 bulletin.json，
+# 但舊圖檔案本身不會自動消失，先清空可以避免殘留檔案越積越多。
 run_ssh([SSH_EXE, "-i", SFTP_KEY_PATH, "-p", SFTP_PORT, *SSH_OPTS,
-         SSH_TARGET, f"mkdir -p {REMOTE_DIR}/images"])
+         SSH_TARGET, f"rm -rf {REMOTE_DIR}/images && mkdir -p {REMOTE_DIR}/images"])
 
 scp_with_retry(JSON_PATH, f"{REMOTE_DIR}/bulletin.json")
 print("已上傳：bulletin.json")
