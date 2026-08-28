@@ -218,18 +218,30 @@ async function fetchBulletins() {
   const res = await fetch(`${FUNCTIONS_BASE_URL}/bulletin`, {
     headers: { Authorization: `Bearer ${idToken}` },
   });
-  if (!res.ok) return null;
-  return res.json();
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* 非 JSON 回應，交給呼叫端當失敗處理 */ }
+  return { ok: res.ok, status: res.status, body };
 }
 
 async function tryLoadBulletins() {
-  const data = await fetchBulletins();
-  if (data) {
-    showBulletinView(data);
-  } else {
-    hide("loading-view");
-    show("verify-view");
+  const { ok, status, body } = await fetchBulletins();
+  if (ok) {
+    showBulletinView(body);
+    return;
   }
+
+  // LINE ID token 過期跟「還沒驗證過」是兩回事：已經驗證過的人不該因為 token 過期
+  // 就被誤導成要重新輸入驗證碼，這裡強制重新登入換一組新 token 再試一次就好，
+  // 每次頁面載入只重試一次，避免萬一新 token 還是被拒就無限重導。
+  if (status === 401 && body && body.error === "invalid_id_token" && !sessionStorage.getItem("relogin_retried")) {
+    sessionStorage.setItem("relogin_retried", "1");
+    liff.logout();
+    liff.login({ redirectUri: window.location.href });
+    return;
+  }
+
+  hide("loading-view");
+  show("verify-view");
 }
 
 async function submitVerify() {
