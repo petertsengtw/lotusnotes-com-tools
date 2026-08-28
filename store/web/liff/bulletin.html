@@ -121,6 +121,10 @@
     <div class="center-msg">請透過 LINE App 開啟本頁面。</div>
   </div>
 
+  <div id="token-expired-view" class="panel" hidden>
+    <div class="center-msg">LINE 登入資訊已過期，請關閉此頁面後，重新從圖文選單開啟即可（不需要重新輸入驗證碼）。</div>
+  </div>
+
   <div id="verify-view" class="panel" hidden>
     <h2>身分驗證</h2>
     <p class="hint">請輸入您的姓名/Notes ID，以及院內公佈欄公告裡的本期驗證碼。</p>
@@ -230,13 +234,13 @@ async function tryLoadBulletins() {
     return;
   }
 
-  // LINE ID token 過期跟「還沒驗證過」是兩回事：已經驗證過的人不該因為 token 過期
-  // 就被誤導成要重新輸入驗證碼，這裡強制重新登入換一組新 token 再試一次就好，
-  // 每次頁面載入只重試一次，避免萬一新 token 還是被拒就無限重導。
-  if (status === 401 && body && body.error === "invalid_id_token" && !sessionStorage.getItem("relogin_retried")) {
-    sessionStorage.setItem("relogin_retried", "1");
-    liff.logout();
-    liff.login({ redirectUri: window.location.href });
+  // LINE ID token 過期跟「還沒驗證過」是兩回事：已經驗證過的人不該被誤導成要
+  // 重新輸入驗證碼。但這裡不是 LIFF 的 Endpoint URL，liff.login() 的 OAuth
+  // 轉址流程在這裡不能用（LINE 只認 Endpoint URL 這個回呼網址，會回 400 或
+  // 被導去錯的頁面），所以只能請使用者自己關閉頁面、重新從圖文選單開啟。
+  if (status === 401 && body && body.error === "invalid_id_token") {
+    hide("loading-view");
+    show("token-expired-view");
     return;
   }
 
