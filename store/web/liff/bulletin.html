@@ -149,7 +149,7 @@
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
-const LIFF_ID = "__LIFF_ID__";
+const LIFF_ID = "__BULLETIN_LIFF_ID__";
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({
@@ -235,9 +235,8 @@ async function tryLoadBulletins() {
   }
 
   // LINE ID token 過期跟「還沒驗證過」是兩回事：已經驗證過的人不該被誤導成要
-  // 重新輸入驗證碼。但這裡不是 LIFF 的 Endpoint URL，liff.login() 的 OAuth
-  // 轉址流程在這裡不能用（LINE 只認 Endpoint URL 這個回呼網址，會回 400 或
-  // 被導去錯的頁面），所以只能請使用者自己關閉頁面、重新從圖文選單開啟。
+  // 重新輸入驗證碼。這裡不自動呼叫 liff.login() 重新登入，維持跟特約商店查詢頁
+  // 一致的簡單做法，直接請使用者重新開啟頁面即可。
   if (status === 401 && body && body.error === "invalid_id_token") {
     hide("loading-view");
     show("token-expired-view");

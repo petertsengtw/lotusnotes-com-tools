@@ -342,9 +342,12 @@ venv32\Scripts\python.exe store\deploy_liff.py
 
 ```
 BULLETIN_SECRET_SLUG=（存取控制用的隨機路徑，本機跟 Cloud Functions 的 secret 要一致）
+BULLETIN_LIFF_ID=（bulletin.html 專用的第二個 LIFF app ID，見下方說明）
 ```
 
-**圖文選單設定注意事項**：「福利公告查詢」按鈕**不能**用 `https://liff.line.me/{LIFF_ID}` 這個短網址（一個 LIFF ID 只對應一個固定 Endpoint URL，目前指向特約商店查詢頁），要直接連到完整網址 `https://hlm.tzuchi.com.tw/store/liff/bulletin.html`，同一組 LIFF ID 的登入驗證一樣能用，不用另外申請新的 LIFF app。
+**圖文選單設定注意事項 / 為什麼 bulletin.html 需要自己的 LIFF app**：一開始曾經想讓「福利公告查詢」共用特約商店查詢頁那組 `LIFF_ID`，直接連完整網址 `https://hlm.tzuchi.com.tw/store/liff/bulletin.html` 繞過短網址（因為一個 LIFF ID 只能登記一個 Endpoint URL，短網址 `https://liff.line.me/{LIFF_ID}` 固定指向特約商店查詢頁）。**這個做法實際上行不通**：LIFF SDK 會把用完整網址直接開啟的頁面判斷成「外部瀏覽器」（`liff.isInClient()` 是 `false`），沒辦法沿用 LINE App 本身的登入狀態，會一直卡在「LINE 登入狀態已失效」，重灌 LINE、清快取、刪 Firestore 綁定紀錄都沒用。
+
+正確做法是在 LINE Developers Console **同一個 LINE Login Channel** 底下另外建立第二個 LIFF app，Endpoint URL 設成 `https://hlm.tzuchi.com.tw/store/liff/bulletin.html`，把拿到的 LIFF ID 填進 `.env` 的 `BULLETIN_LIFF_ID`，圖文選單的「福利公告查詢」按鈕改連這組新 LIFF app 的短網址 `https://liff.line.me/{BULLETIN_LIFF_ID}`。因為兩個 LIFF app 是同一個 Channel，`verify_line_id_token()` 驗證出來的 `sub`（LINE 使用者 ID）相同，Firestore 的驗證綁定狀態（`lineAuth/{sub}`）兩邊共用，同仁不需要分別驗證兩次。
 
 **同時同步特約商店 + 福利公告**：Lotus 資料兩邊都更新完，不想分兩次下指令的話可以用根目錄的 `sync_all.py`，一次跑完 `store/sync_stores_to_firestore.py` + `bulletin/deploy_bulletin.py`：
 
