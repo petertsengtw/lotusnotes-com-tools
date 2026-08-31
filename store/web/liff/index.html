@@ -186,7 +186,7 @@ function renderStores() {
       <h3>${escapeHtml(s.name)}</h3>
       <p>📍 ${s.address ? `<a class="address" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}" target="_blank" rel="noopener">${escapeHtml(s.address)}</a>` : ""}</p>
       <p>📞 ${escapeHtml(s.tel || "")}</p>
-      ${s.contents ? `<div class="offer">🎁 ${formatContents(s.contents)}</div>` : ""}
+      ${s.contents && s.contents.trim() !== "如附件" ? `<div class="offer">🎁 ${formatContents(s.contents)}</div>` : ""}
       <div class="expire">優惠期限：${s.expire ? s.expire.replaceAll("-", "/") : "長期"}</div>
     `;
     list.appendChild(card);
