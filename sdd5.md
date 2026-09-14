@@ -6,7 +6,7 @@
 
 - **Phase 1、Phase 2 已完整實作並在正式環境驗收通過**——`store/web/apply.html`／`apply_status.html` 已部署上線，Cloud Functions（`apply`／`application_status`／`download_file`／`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`）已部署到 `hlwelfare` 專案，`store/prepare_contract_template.py`／`generate_contracts.py` 已用真實申請資料跑過一次完整流程（送出申請 → 審核核准 → 套版產生 PDF → 上傳 → 查詢下載，兩種合約來源都測過），詳見 §7 驗收標準勾選狀態。純邏輯單元測試（`firebase/functions/tests/test_applications.py`）全數通過。
 - **首次部署踩到的坑**（已修正，供之後參考）：`.env` 的環境變數名稱不能叫 `FIREBASE_STORAGE_BUCKET`——`firebase deploy` 會拒絕 `.env` 裡任何以 `FIREBASE_`／`X_GOOGLE_`／`EXT_`／`KIT_` 開頭的變數名稱（保留字首），已改名為 `STORAGE_BUCKET_NAME`。另外 `generate_contracts.py` 需要的 `STORE_PUBLIC_BASE_URL`（組合約 PDF 對外網址用）第一次忘了同步加進根目錄 `.env`，已補上。
-- **Phase 3（LINE 官方帳號身分綁定與用印回傳）程式碼已寫完**——`firebase/functions/line_webhook_auth.py`（簽章驗證）、`line_messaging.py`（呼叫 LINE Messaging API 回覆訊息／下載檔案內容）、`merchant_binding.py`（身分綁定、節流、檔案接收）、`main.py` 新增的 `line_webhook`／`admin_update_status` 端點，`store/apply_review.py` 也擴充了 `--status merchant_signed`（人工核對用印後標記完成）跟 `--abandon` 兩個新流程。純邏輯部分已有單元測試且全數通過。**尚未部署也尚未實測**——需要先取得「花蓮職工福利行政小組」LINE 官方帳號 Messaging API 頻道的 `LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN`（目前完全沒有，見 §6），並在 LINE Developers Console 設定 Webhook URL，這些都需要你親自到 LINE 後台操作，我沒辦法代勞。
+- **Phase 3（LINE 官方帳號身分綁定與用印回傳）已部署並用真實 LINE 帳號驗收核心流程通過（2026-09-14）**——`firebase/functions/line_webhook_auth.py`（簽章驗證）、`line_messaging.py`（呼叫 LINE Messaging API 回覆訊息／下載檔案內容）、`merchant_binding.py`（身分綁定、節流、檔案接收）、`main.py` 新增的 `line_webhook`／`admin_update_status` 端點，`store/apply_review.py` 也擴充了 `--status merchant_signed`（人工核對用印後標記完成）跟 `--abandon` 兩個新流程。「花蓮職工福利行政小組」這個 LINE 官方帳號原本只有 LINE Login 頻道（LIFF 用），從來沒啟用過 Messaging API——實際是在 LINE Official Account Manager 的「設定→Messaging API」按下啟用後，才多出一個獨立的 Messaging API 頻道，`LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN` 是從那個新頻道取得，跟既有的 `LINE_LOGIN_CHANNEL_ID` 是兩個完全不同的頻道。實測：加好友後輸入申請編號+查詢碼完成綁定、傳送檔案後狀態自動轉 `merchant_signed`、`download_file` 讀回內容正確；`apply_review.py --status merchant_signed`／`--abandon` 這兩個互動流程本身、節流機制、檔案類型/大小擋不合法這幾項還沒實測，詳見 §7。
 
 ---
 
@@ -304,13 +304,7 @@ flowchart TD
 7. **蜜罐欄位 + IP 頻率限制是否足夠擋濫用**：先用最低成本方案上線觀察，若之後發現大量假申請灌進來，再加 Google reCAPTCHA v3。
 8. **`queryCode` 遺失後的補救動線**：目前設計是打電話/寄信給職工福利小組，由職工福利小組用姓名/統編/電話手動查詢——需要確認 `admin_list_applications` 要不要加關鍵字搜尋參數方便這種情境（目前只設計了依 `status` 篩選）。
 9. **是否要分階段實作**：建議第一階段先做「表單送出 + Firestore 儲存 + `apply_review.py` 審核」，讓蒐集資訊這件事先數位化（合約仍沿用現行人工填寫方式），等拿到範本檔案、確認轉檔可行後，第二階段再做 §4.5 的自動套版產生 PDF；§4.7/§4.8 的 LINE 綁定與檔案回傳可以再往後排第三階段。這樣可以先讓最有價值、風險最低的一半（取代電話聯繫）先上線，避免合約範本細節没確認清楚就卡住整個開發進度。
-10. **部署 Phase 3 前，需要你親自到 LINE Developers Console 完成以下設定**（`sdd3.md`/`sdd4.md` 目前只用 LIFF + push，這是本專案第一次要用到 Messaging API 的 webhook 接收模式）：
-    1. 確認「花蓮職工福利行政小組」這個 LINE 官方帳號有沒有啟用 Messaging API（多數 LINE 官方帳號預設就有）。
-    2. 到該 Channel 的「Messaging API」分頁，取得 **Channel Secret**（`LINE_CHANNEL_SECRET`）跟產生一組 **Channel Access Token**（`LINE_CHANNEL_ACCESS_TOKEN`）——這兩組是全新的憑證，跟 sdd3.md 既有的 `LINE_LOGIN_CHANNEL_ID`（LIFF 登入用）、根目錄 `.env` 的 `LINE_CHANNEL_TOKEN`（功能一打卡通知用，不同的 LINE 帳號）都不是同一組，不能混用。
-    3. 把 Webhook URL 設成 `line_webhook` 部署後的網址，並開啟「Use webhook」。
-    4. 建議關閉 LINE 官方帳號本身的「自動回應訊息」「加入好友的歡迎訊息」等內建自動回覆功能，避免跟 `line_webhook` 自己的回覆邏輯互相干擾或重複回覆。
-    5. 兩組新憑證要設定成 Cloud Functions 的 secret（`firebase functions:secrets:set LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN`），不是放在 `.env` 一般變數。
-    完成以上設定前，`line_webhook` 部署了也無法真正運作（LINE 平台不會把訊息送過來）。
+10. ~~部署 Phase 3 前，需要你親自到 LINE Developers Console 完成以下設定~~ **已解決（2026-09-14）**：「花蓮職工福利行政小組」這個 LINE 官方帳號原本**完全沒有啟用 Messaging API**（只有 LINE Login 頻道，`sdd3.md` 的 LIFF 就是掛在那個頻道底下），實際查證發現要到 **LINE Official Account Manager**（`manager.line.biz`，不是 LINE Developers Console）→ 設定 → Messaging API → 按「啟用 Messaging API」，才會在 LINE Developers Console 底下多出一個獨立的 Messaging API 頻道。取得該頻道的 **Channel Secret**（`LINE_CHANNEL_SECRET`）跟簽發的 **Channel Access Token**（`LINE_CHANNEL_ACCESS_TOKEN`）後，設定成 Cloud Functions 的 secret（`firebase functions:secrets:set`），部署後把 Webhook 網址（`https://us-central1-hlwelfare.cloudfunctions.net/line_webhook`）貼回 LINE Official Account Manager 的「回應設定」頁面並打開 Webhook 開關（這個開關在 OA Manager 本身就有，不需要另外跑一趟 LINE Developers Console）。「自動回應訊息」已確認關閉；「加入好友的歡迎訊息」目前還開著，不影響 `line_webhook`（只處理 message 事件，不處理 follow 事件），暫不處理。已用真實 LINE 帳號實測綁定+傳檔案流程成功，見 §7。
 11. ~~Firebase 專案是否已啟用 Cloud Storage~~ **已解決**：已在 Firebase Console 開通，bucket 為 `gs://hlwelfare.firebasestorage.app`，安全性規則為正式版模式（`allow read, write: if false`，僅 Admin SDK 能讀寫，符合設計）。
 12. **申請編號+查詢碼在聊天視窗打字核對的容錯**：使用者可能打錯格式（例如漏空格、全形/半形符號），`line_webhook` 解析時需要一定的容錯處理，細節留待實作時處理。
 13. **「使用店家制式範本」的審核標準沒有明訂**：職工福利小組審核時要判斷店家自己上傳的合約條款能不能接受，這需要一份判斷基準（例如哪些條款一定要有、哪些不能出現），目前設計只寫「人工拿捏」，實際上線前建議先跟福委會/院方法務確認要不要訂一份簡單的審核checklist，避免每個人審核標準不一致。
@@ -337,15 +331,15 @@ flowchart TD
 - [x] 查詢碼錯誤时一律回「查無資料」，不透露是編號錯還是碼錯——已實測（`application_status`、`download_file` 都測過）
 - [ ] 職工福利小組可標記「店家已回傳用印」「雙方用印完成」，並記錄最終檔案下載網址（選填）——這幾個狀態轉換屬於 §4.7/§4.8（第三階段）範圍，`admin_update_status` 端點尚未實作
 
-**LINE 身分綁定與用印檔案回傳（第三階段）**——**程式碼已寫完（含單元測試），以下全部尚未實測**：需要先完成 §6 第 10 項的 LINE Developers Console 設定（取得 `LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN`、設定 Webhook URL）才能部署跟實測
-- [ ] 店家加入 LINE 官方帳號後，在聊天視窗輸入正確的申請編號+查詢碼可以完成綁定，並收到確認回覆
-- [ ] 輸入錯誤的申請編號/查詢碼組合會被拒絕且不會誤判綁定成功，連續錯誤達上限會被節流（`merchantBindAttempts`）
-- [ ] 已綁定的店家在聊天視窗傳送 PDF/圖片檔案，`line_webhook` 可正確下載並存進 Firebase Storage，`storeApplications` 狀態自動轉為 `merchant_signed`
-- [ ] 未綁定的 LINE 使用者傳送檔案會被拒絕並提示先完成綁定
-- [ ] 傳送的檔案類型/大小不符時會被拒絕並提示重傳（PDF/jpg/png、20MB 以內，見 §5）
-- [ ] `line_webhook` 沒有正確簽章的請求會被拒絕（400）
-- [ ] 職工福利小組用 `apply_review.py --status merchant_signed` 可以下載檢查店家回傳的用印檔案，確認後標記完成（`completed`）
-- [ ] `apply_review.py --abandon <申請編號>` 可以正確把申請標記為 `abandoned`
+**LINE 身分綁定與用印檔案回傳（第三階段）**——已完成 LINE Developers Console 設定（取得 `LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN`、Messaging API 頻道獨立於既有的 LINE Login 頻道之外另外啟用、設定 Webhook URL 並開啟）、部署上線，且**用真實 LINE 帳號跑過核心流程**：
+- [x] 店家加入 LINE 官方帳號後，在聊天視窗輸入正確的申請編號+查詢碼可以完成綁定，並收到確認回覆——已用真實裝置實測（收到「已確認您是『測試商店-請忽略』」回覆）
+- [ ] 輸入錯誤的申請編號/查詢碼組合會被拒絕且不會誤判綁定成功，連續錯誤達上限會被節流（`merchantBindAttempts`）——尚未實測
+- [x] 已綁定的店家在聊天視窗傳送 PDF/圖片檔案，`line_webhook` 可正確下載並存進 Firebase Storage，`storeApplications` 狀態自動轉為 `merchant_signed`——已用真實裝置實測（傳送照片後狀態正確轉換，`download_file` 讀回內容正確）
+- [ ] 未綁定的 LINE 使用者傳送檔案會被拒絕並提示先完成綁定——尚未實測
+- [ ] 傳送的檔案類型/大小不符時會被拒絕並提示重傳（PDF/jpg/png、20MB 以內，見 §5）——尚未實測
+- [x] `line_webhook` 沒有正確簽章的請求會被拒絕（400）——已實測（未帶簽章、假簽章皆正確拒絕；真實 LINE 簽章的請求正確通過）
+- [ ] 職工福利小組用 `apply_review.py --status merchant_signed` 可以下載檢查店家回傳的用印檔案，確認後標記完成（`completed`）——底層的 `admin_update_status`／`download_file(kind=merchant_signed)` 端點已實測正確，但 `apply_review.py` 這個互動流程本身還沒有人實際跑過一次
+- [ ] `apply_review.py --abandon <申請編號>` 可以正確把申請標記為 `abandoned`——尚未實測
 
 ## 附錄 A：個人資料蒐集、處理及利用告知事項（草稿，待法務確認）
 

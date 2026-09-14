@@ -360,7 +360,7 @@ venv32\Scripts\python.exe sync_all.py
 
 ## 功能六：特約商店線上申請（`store/`，見 `sdd5.md`）
 
-取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；核准後店家可加入 LINE 官方帳號完成身分核對，之後用印完成直接在 LINE 傳回掃描檔即可，不用寄 Email。**Phase 1、Phase 2 已部署到正式環境並用真實申請資料驗收通過**；**Phase 3（LINE 官方帳號身分綁定與用印檔案回傳）程式碼已寫完，但尚未部署也尚未實測**——需要先到 LINE Developers Console 取得「花蓮職工福利行政小組」Messaging API 頻道的憑證並設定 Webhook URL，詳見 `sdd5.md` §6 第 10 項、§7。
+取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；核准後店家可加入 LINE 官方帳號完成身分核對，之後用印完成直接在 LINE 傳回掃描檔即可，不用寄 Email。**Phase 1、Phase 2、Phase 3 都已部署到正式環境，核心流程用真實資料/真實 LINE 帳號驗收通過**（2026-09-14）。詳見 `sdd5.md` §7 各項勾選狀態。
 
 ```powershell
 # 部署 apply.html / apply_status.html 到 Ubuntu 網站伺服器
@@ -389,7 +389,7 @@ STORE_PUBLIC_BASE_URL=https://hlm.tzuchi.com.tw/store
 
 **統一編號查證的已知限制**（`store/tax_id_lookup.py`，見 `sdd5.md` §4.10、§6）：「統編查公司名稱」（公司登記）實測免申請即可用；「商業統一編號查商號名稱」（商業/商號登記，特約商店裡更常見的類型）實測需要向經濟部申請 IP 白名單才能用，這台機器目前還沒申請，`apply_review.py` 審核時會清楚顯示「查證功能未開通」，不會誤判成「查無登記資料」。
 
-### LINE 官方帳號身分綁定與用印回傳（`line_webhook`，尚未部署）
+### LINE 官方帳號身分綁定與用印回傳（`line_webhook`，已部署並實測通過）
 
 店家核准後加入「花蓮職工福利行政小組」LINE 官方帳號，在聊天視窗輸入「申請編號 查詢碼」完成身分核對，之後直接在同一個對話傳回用印完成的掃描檔即可，不用寄 Email——詳見 `sdd5.md` §4.7、§4.8。
 
@@ -401,15 +401,15 @@ venv32\Scripts\python.exe store\apply_review.py --status merchant_signed
 venv32\Scripts\python.exe store\apply_review.py --abandon 20260909-03
 ```
 
-**部署前必須先到 LINE Developers Console 完成設定**（這是本專案第一次要用到 Messaging API 的 webhook 接收模式，`sdd3.md`/`sdd4.md` 只用 LIFF + push）：
-1. 確認「花蓮職工福利行政小組」這個 LINE 官方帳號有啟用 Messaging API。
-2. 該 Channel 的「Messaging API」分頁取得 **Channel Secret**、產生 **Channel Access Token**——這兩組是全新憑證，跟 `sdd3.md` 既有的 `LINE_LOGIN_CHANNEL_ID`（LIFF 登入用）、根目錄 `.env` 的 `LINE_CHANNEL_TOKEN`（功能一打卡通知用，不同的 LINE 帳號）都不是同一組，不能混用，設成 Cloud Functions 的 secret：
+**部署設定過程**（這是本專案第一次用到 Messaging API 的 webhook 接收模式，`sdd3.md`/`sdd4.md` 只用 LIFF + push；已完成，記錄供未來參考）：
+1. 「花蓮職工福利行政小組」這個 LINE 官方帳號**原本沒有啟用 Messaging API**（只有 `sdd3.md` LIFF 用的 LINE Login 頻道）——要到 **LINE Official Account Manager**（`manager.line.biz`，不是 LINE Developers Console）→ 設定 → Messaging API → 按「啟用 Messaging API」，才會多出一個獨立的 Messaging API 頻道。
+2. 該頻道取得 **Channel Secret**、產生 **Channel Access Token**——這兩組是全新憑證，跟 `sdd3.md` 既有的 `LINE_LOGIN_CHANNEL_ID`（LIFF 登入用）、根目錄 `.env` 的 `LINE_CHANNEL_TOKEN`（功能一打卡通知用，不同的 LINE 帳號）都不是同一組，不能混用，設成 Cloud Functions 的 secret：
    ```powershell
    firebase functions:secrets:set LINE_CHANNEL_SECRET
    firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
    ```
-3. Webhook URL 設成 `line_webhook` 部署後的網址，並開啟「Use webhook」。
-4. 建議關閉 LINE 官方帳號內建的「自動回應訊息」「加入好友的歡迎訊息」，避免跟 `line_webhook` 自己的回覆邏輯衝突。
+3. 部署後把 Webhook 網址（`https://us-central1-hlwelfare.cloudfunctions.net/line_webhook`）貼回 **LINE Official Account Manager**「設定 → Messaging API」頁面的 Webhook 網址欄位並儲存，再到「設定 → 回應設定」把 **Webhook** 開關打開（這個開關就在 OA Manager 本身，不需要另外去 LINE Developers Console）。
+4. 「自動回應訊息」記得關閉，避免跟 `line_webhook` 自己的回覆邏輯衝突；「加入好友的歡迎訊息」不影響（`line_webhook` 只處理 message 事件，不處理 follow 事件），可以留著。
 
 **新增 Firestore collection**：`merchantLineAuth`（身分綁定）、`merchantBindAttempts`（防暴力猜測節流，跟 `codeAttempts` 同一套精神）。
 
