@@ -5,6 +5,12 @@
     python apply_review.py --status merchant_signed  # 處理店家已用印回傳、待人工蓋院方大小章的申請
     python apply_review.py --status approved   # 純瀏覽（例如看目前卡在等套版的申請）
     python apply_review.py --abandon 20260909-03     # 把指定申請標記為放棄/不予受理
+    python apply_review.py --find 統編或店名或電話      # 店家忘了申請編號/查詢碼時，搜尋並顯示
+
+`--find` 會在所有狀態的申請裡搜尋（店名、負責人、聯絡人、統編、電話、Email、申請
+編號，部分符合即可，電話可帶或不帶橫線），列出符合的申請、狀態、以及**查詢碼**。
+查詢碼是店家下載合約的唯一憑證，告訴對方之前請先核對身分（例如對方能說出統編、
+留的電話跟申請資料相符）。
 
 `--status pending` 時逐筆審核；`--status merchant_signed` 時逐筆提示是否要
 下載檢查店家回傳的用印檔案、確認流程做完（列印、蓋院方大小章、掃描、透過 LINE
@@ -162,6 +168,42 @@ def print_application(app: dict):
     print(describe_tax_id(app["taxId"]))
 
 
+FIND_FIELDS = ("applicationId", "storeName", "ownerName", "contactPerson", "taxId", "phone", "email")
+
+
+def _digits_only(text: str) -> str:
+    return "".join(ch for ch in text if ch.isdigit())
+
+
+def matches_keyword(app: dict, keyword: str) -> bool:
+    kw = keyword.strip().lower()
+    if not kw:
+        return False
+    kw_digits = _digits_only(kw)
+    for field in FIND_FIELDS:
+        value = str(app.get(field) or "").lower()
+        if kw in value:
+            return True
+        # 電話這類欄位，對方可能帶橫線/空格也可能不帶，比對純數字（至少 3 碼才比，避免太短誤中）
+        if len(kw_digits) >= 3 and set(kw) <= set("0123456789-() +/") and kw_digits in _digits_only(value):
+            return True
+    return False
+
+
+def find_applications(keyword: str):
+    matched = [a for a in fetch_applications(None) if matches_keyword(a, keyword)]
+    if not matched:
+        print(f"找不到符合「{keyword}」的申請")
+        return
+
+    print(f"共找到 {len(matched)} 筆符合「{keyword}」的申請（查詢碼是下載合約的憑證，告知前請先核對對方身分）")
+    for app in matched:
+        print("-" * 50)
+        print(f"申請編號：{app['applicationId']}　查詢碼：{app.get('queryCode', '（無）')}　狀態：{app['status']}")
+        print(f"店名：{app['storeName']}　負責人：{app['ownerName']}　統編：{app['taxId']}")
+        print(f"電話：{app['phone']}　Email：{app['email']}")
+
+
 def review_pending(app: dict):
     print_application(app)
 
@@ -216,7 +258,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--status", default="pending", help="要列出的申請狀態（預設 pending）")
     parser.add_argument("--abandon", metavar="APPLICATION_ID", help="把指定申請標記為 abandoned（放棄/不予受理），不會進入其他審核流程")
+    parser.add_argument("--find", metavar="關鍵字", help="搜尋所有狀態的申請（店名/負責人/聯絡人/統編/電話/Email/申請編號），顯示申請編號與查詢碼")
     args = parser.parse_args()
+
+    if args.find:
+        find_applications(args.find)
+        return
 
     if args.abandon:
         print(f"已標記為 abandoned：{submit_update_status(args.abandon, 'abandoned')}")

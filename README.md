@@ -399,6 +399,9 @@ venv32\Scripts\python.exe store\apply_review.py --status merchant_signed
 
 # 把指定申請標記為放棄/不予受理
 venv32\Scripts\python.exe store\apply_review.py --abandon 20260909-03
+
+# 店家忘了申請編號/查詢碼：用店名、統編、電話等搜尋，顯示申請編號與查詢碼（告知前請先核對對方身分）
+venv32\Scripts\python.exe store\apply_review.py --find 23456789
 ```
 
 **部署設定過程**（這是本專案第一次用到 Messaging API 的 webhook 接收模式，`sdd3.md`/`sdd4.md` 只用 LIFF + push；已完成，記錄供未來參考）：
@@ -419,6 +422,7 @@ venv32\Scripts\python.exe store\apply_review.py --abandon 20260909-03
 
 | 檔案 | 說明 |
 |---|---|
+| `menu.py` | 工具腳本選單：`python menu.py` 顯示所有常用工具與簡述，輸入編號即執行（自動用 `venv32` 直譯器；新增工具只要在檔案內的 `MENU` 加一筆） |
 | `check_notes.py` | 列出 hmsign.nsf 所有 View（維護用） |
 | `inspect_news.py` | 列出 mddpdoc.nsf 的 View、Form 及第一筆欄位（維護用） |
 | `query_checkin.py` | 查詢指定日期區間的打卡紀錄 |
