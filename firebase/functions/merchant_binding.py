@@ -9,6 +9,7 @@ transaction 讀取後立刻遞增，避免同時間多個請求繞過鎖定次�
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from google.cloud import firestore
@@ -17,6 +18,20 @@ import applications
 
 MAX_FAIL_COUNT = 5
 LOCK_MINUTES = 15
+
+# applicationId 的格式是 {YYYYMMDD}-{序號}（見 applications.py），拿來判斷一則
+# 文字訊息「看起來像不像」在嘗試輸入申請編號。這個 LINE 官方帳號同時服務既有
+# 同仁（sdd3.md 的 LIFF 查詢）跟外部店家（這裡的聊天綁定），完全不相關的閒聊
+# 訊息很常見，不能每次都當成「格式不正確」回覆，見 _looks_like_binding_attempt()
+# 呼叫端的說明。
+_APPLICATION_ID_LIKE = re.compile(r"\d{8}-\d+")
+
+
+def looks_like_binding_attempt(text: str) -> bool:
+    """訊息裡有沒有出現「8碼數字-數字」這種申請編號的樣子。只有像的時候才會
+    進入實際綁定比對、回覆訊息；完全不像的（例如一般聊天）一律不回覆，避免
+    對不相關的人（多半是既有同仁）跳出無意義的「格式不正確」訊息。"""
+    return bool(_APPLICATION_ID_LIKE.search(text))
 
 
 def get_binding(db: firestore.Client, line_user_id: str) -> dict | None:

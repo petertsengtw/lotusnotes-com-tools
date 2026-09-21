@@ -439,15 +439,16 @@ def _handle_line_event(db, event: dict) -> None:
     binding = merchant_binding.get_binding(db, line_user_id)
 
     if binding is None:
-        if message_type != "text":
-            line_messaging.reply_text(
-                reply_token,
-                "請先輸入您的申請編號與查詢碼完成身分核對，才能傳送用印檔案"
-                "（例如：20260909-03 AB12CD34）。",
-            )
+        text = message.get("text", "") if message_type == "text" else ""
+        if not merchant_binding.looks_like_binding_attempt(text):
+            # 這個 LINE 官方帳號同時服務既有同仁（sdd3.md 的 LIFF 查詢）跟外部店家
+            # （這裡的聊天綁定）。完全不像在嘗試輸入申請編號的訊息——不管是一般
+            # 閒聊、貼圖、還是隨手傳的照片——一律不回覆，避免對不相關的人（多半
+            # 是既有同仁）跳出無意義的「格式不正確」訊息（依實際上線後回報調整，
+            # 見 sdd5.md §6）。
             return
 
-        result = merchant_binding.try_bind(db, line_user_id, message.get("text", ""))
+        result = merchant_binding.try_bind(db, line_user_id, text)
         if result["result"] == "bound":
             line_messaging.reply_text(
                 reply_token, f"已確認您是「{result['storeName']}」，之後可以直接在這裡傳回用印檔案。"
