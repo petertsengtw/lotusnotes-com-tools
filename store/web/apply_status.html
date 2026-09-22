@@ -61,6 +61,45 @@
     text-decoration: none;
     font-weight: 600;
   }
+  .next-box {
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .next-box h3 { margin: 0 0 8px; font-size: 1rem; color: var(--primary); }
+  .next-box ol { margin: 0 0 6px; padding-left: 20px; font-size: 0.9rem; color: var(--text); }
+  .next-box ol li { margin-bottom: 4px; }
+  .next-box .line-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #06c755;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .next-box .line-btn.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 400;
+    font-size: 0.9rem;
+  }
+  .next-box .small { margin: 10px 0 0; font-size: 0.82rem; color: var(--muted); }
+  .next-box input[type=file] { display: block; width: 100%; margin: 10px 0 0; font-size: 0.9rem; color: var(--text); }
+  .next-box .upload-btn { background: var(--primary); }
+  .next-box .upload-btn:hover:not(:disabled) { background: var(--primary-hover); }
+  .next-box .line-btn:disabled { opacity: 0.6; cursor: default; }
+  .line-details { margin-top: 14px; }
+  .line-details summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+  .line-details .next-box { margin-top: 8px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -187,7 +226,190 @@ function renderResult(data, applicationId, queryCode) {
       a.rel = "noopener";
       extra.appendChild(a);
     }
+    extra.appendChild(buildUploadBox(applicationId, queryCode, false));
+    extra.appendChild(buildLineSection(applicationId, queryCode));
+  } else if (data.status === "merchant_signed") {
+    // 已經傳過一次，但可能傳錯檔案，允許重傳（以最新上傳的為準）。
+    extra.appendChild(buildUploadBox(applicationId, queryCode, true));
   }
+}
+
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;  // 跟後端 MAX_MERCHANT_FILE_BYTES 一致
+const UPLOAD_ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+const UPLOAD_ERRORS = {
+  invalid_file_type: "檔案格式不符，僅接受 PDF、JPG、PNG",
+  file_too_large: "檔案太大，請壓縮到 20MB 以內再上傳",
+  not_accepting_upload: "目前的申請狀態無法上傳，如有疑問請聯繫職工福利行政小組",
+  rate_limited: "今天上傳次數過多，請明天再試，或改用電話/Email 聯繫職工福利行政小組",
+  not_found: "申請編號或查詢碼有誤，請重新查詢",
+  missing_fields: "請先選擇要上傳的檔案",
+};
+
+// 店家直接在網頁上傳蓋好章的合約掃描檔（sdd5.md §4.7.1）。身分核對就是剛剛查詢用的
+// 申請編號+查詢碼，不需要店家再多做任何一步。
+function buildUploadBox(applicationId, queryCode, isReupload) {
+  const box = document.createElement("div");
+  box.className = "next-box";
+
+  const h = document.createElement("h3");
+  h.textContent = isReupload ? "傳錯檔案了？可以重新上傳" : "下一步：上傳蓋好章的合約";
+  box.appendChild(h);
+
+  if (isReupload) {
+    const p = document.createElement("p");
+    p.className = "small";
+    p.textContent = "重新上傳後，會以最新上傳的檔案為準。";
+    box.appendChild(p);
+  } else {
+    const ol = document.createElement("ol");
+    [
+      "下載合約、列印，蓋好公司大小章與負責人簽名",
+      "掃描成一個 PDF（多頁請合併成同一個檔案，或直接拍照上傳 JPG/PNG）",
+      "在下方選擇檔案，按「上傳」",
+    ].forEach((t) => {
+      const li = document.createElement("li");
+      li.textContent = t;
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+  box.appendChild(input);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "line-btn upload-btn";
+  btn.textContent = "上傳";
+  box.appendChild(btn);
+
+  const msg = document.createElement("div");
+  msg.className = "form-msg";
+  box.appendChild(msg);
+
+  const note = document.createElement("p");
+  note.className = "small";
+  note.textContent = "檔案格式：PDF、JPG、PNG，20MB 以內。不方便上傳的話，也可以電話或 Email 聯繫職工福利行政小組。";
+  box.appendChild(note);
+
+  function fail(text) {
+    msg.textContent = text;
+    msg.className = "form-msg error";
+  }
+
+  btn.addEventListener("click", async () => {
+    const file = input.files[0];
+    if (!file) return fail(UPLOAD_ERRORS.missing_fields);
+    // 有些平台讀不到檔案類型（file.type 為空字串）就交給後端判斷，這裡只擋明確不對的。
+    if (file.type && !UPLOAD_ALLOWED_TYPES.includes(file.type)) return fail(UPLOAD_ERRORS.invalid_file_type);
+    if (file.size > UPLOAD_MAX_BYTES) return fail(UPLOAD_ERRORS.file_too_large);
+
+    btn.disabled = true;
+    msg.textContent = "上傳中，請稍候…";
+    msg.className = "form-msg";
+
+    const form = new FormData();
+    form.append("applicationId", applicationId);
+    form.append("queryCode", queryCode);
+    form.append("signedFile", file);
+
+    try {
+      const res = await fetch(`${FUNCTIONS_BASE_URL}/upload_signed_file`, { method: "POST", body: form });
+      let body;
+      try { body = await res.json(); } catch (e) { body = null; }
+
+      if (body && body.ok) {
+        document.getElementById("status-line").textContent = STATUS_LABELS.merchant_signed;
+        box.innerHTML = "";
+        const done = document.createElement("p");
+        done.className = "note";
+        done.textContent = "已收到您上傳的用印檔案，職工福利行政小組確認後會盡快與您聯繫後續事宜。";
+        box.appendChild(done);
+        return;
+      }
+      fail(UPLOAD_ERRORS[body && body.error] || "上傳失敗，請稍後再試，或聯繫職工福利行政小組");
+    } catch (err) {
+      fail(`連線失敗，請稍後再試。（${err.message || err}）`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  return box;
+}
+
+// LINE 官方帳號 ID（含 @），跟 index.html「加入 LINE@ 好友」用的是同一個。
+const LINE_OA_ID = "@959rgvms";
+
+// LINE 是選用的第二管道，預設收合，避免跟上傳區塊搶注意力。
+function buildLineSection(applicationId, queryCode) {
+  const details = document.createElement("details");
+  details.className = "line-details";
+  const summary = document.createElement("summary");
+  summary.textContent = "也可以改用 LINE 傳回（選用）";
+  details.appendChild(summary);
+  details.appendChild(buildLineBox(applicationId, queryCode));
+  return details;
+}
+
+// 店家要在 LINE 聊天視窗輸入「申請編號 查詢碼」才能核對身分（見 sdd5.md §4.7），
+// 這段格式不好記也容易打錯，所以用 LINE 的 oaMessage 連結直接把訊息預先填好，
+// 店家只要按「傳送」；連結打不開時另外提供「複製」當備援。
+function buildLineBox(applicationId, queryCode) {
+  const bindText = `${applicationId} ${queryCode}`;
+  const box = document.createElement("div");
+  box.className = "next-box";
+
+  const h = document.createElement("h3");
+  h.textContent = "用 LINE 傳回蓋好章的合約";
+  box.appendChild(h);
+
+  const ol = document.createElement("ol");
+  [
+    "下載合約、列印，蓋好公司大小章與負責人簽名後，掃描成一個 PDF（多頁請合併成同一個檔案）",
+    "按下方綠色按鈕，會開啟 LINE 聊天視窗，核對訊息已經幫您填好，直接按「傳送」即可",
+    "看到「已確認您是…」之後，再把掃描檔傳到同一個聊天視窗",
+  ].forEach((t) => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ol.appendChild(li);
+  });
+  box.appendChild(ol);
+
+  const send = document.createElement("a");
+  send.className = "line-btn";
+  send.href = `https://line.me/R/oaMessage/${LINE_OA_ID}/?${encodeURIComponent(bindText)}`;
+  send.textContent = "用 LINE 傳送核對訊息";
+  box.appendChild(send);
+
+  const add = document.createElement("a");
+  add.className = "line-btn secondary";
+  add.href = `https://line.me/R/ti/p/${LINE_OA_ID}`;
+  add.textContent = "還沒加入官方帳號？先加入好友";
+  box.appendChild(add);
+
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "line-btn secondary";
+  copy.textContent = "綠色按鈕沒反應？複製核對文字";
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(bindText);
+      copy.textContent = `已複製「${bindText}」，請貼到 LINE 聊天視窗傳送`;
+    } catch (e) {
+      copy.textContent = `請手動輸入：${bindText}`;
+    }
+  });
+  box.appendChild(copy);
+
+  const note = document.createElement("p");
+  note.className = "small";
+  note.textContent = "用 LINE 傳回建議用手機開啟本頁面操作。";
+  box.appendChild(note);
+
+  return box;
 }
 
 document.getElementById("query-submit").addEventListener("click", submitQuery);

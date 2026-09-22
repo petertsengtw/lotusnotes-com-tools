@@ -10,7 +10,8 @@ Cloud Functions（2nd gen, Python）進入點。sdd3.md §5 存取控制的後�
   admin_import_roster  admin-only，本機 import_roster.py 呼叫
   apply                 公開，store/web/apply.html 呼叫，店家送出加入特約申請（sdd5.md）
   application_status    公開，store/web/apply_status.html 呼叫，帶申請編號+查詢碼查進度
-  download_file         公開＋admin 兩種呼叫者皆可，下載店家自有合約書（sdd5.md §4.5.2）
+  upload_signed_file    公開，store/web/apply_status.html 呼叫，店家上傳蓋好章的合約掃描檔（sdd5.md §4.7.1）
+  download_file        公開＋admin 兩種呼叫者皆可，下載店家自有合約書（sdd5.md §4.5.2）
   admin_list_applications   admin-only，本機 apply_review.py 呼叫
   admin_review_application  admin-only，本機 apply_review.py 呼叫
   admin_mark_contract_ready admin-only，本機 generate_contracts.py 呼叫（sdd5.md §4.5.1）
@@ -52,6 +53,11 @@ _PUBLIC_CORS = options.CorsOptions(
     cors_origins=[os.environ.get("ALLOWED_ORIGIN", "https://REPLACE_WITH_REAL_DOMAIN")],
     cors_methods=["get", "post"],
 )
+
+
+# 網頁上傳用印檔每日每 IP 上限。比 /apply 的每日 5 次寬鬆：店家傳錯檔案重傳、多頁
+# 分次試都算次數，而且驗證失敗（猜查詢碼）也一樣計次，所以不能設太低。
+UPLOAD_DAILY_LIMIT = 20
 
 
 def _json_response(payload: dict, status: int = 200) -> https_fn.Response:
@@ -311,6 +317,51 @@ def application_status(req: https_fn.Request) -> https_fn.Response:
         "contractUrl": application.get("contractUrl") if application.get("contractSource") == applications.CONTRACT_SOURCE_HOSPITAL else None,
     }
     return _json_response(payload)
+
+
+@https_fn.on_request(cors=_PUBLIC_CORS)
+def upload_signed_file(req: https_fn.Request) -> https_fn.Response:
+    """
+    店家在 apply_status.html 直接上傳蓋好章的合約掃描檔（sdd5.md §4.7.1），跟 LINE
+    聊天視窗回傳（§4.7）是兩個並行的管道，最後都走 merchant_binding.receive_file()
+    存檔並把狀態轉成 merchant_signed。
+
+    完全公開的上傳入口，防護：申請編號+查詢碼驗證、狀態必須是可上傳的（見
+    applications.UPLOAD_ACCEPTING_STATUSES）、檔案類型/大小/檔頭位元組檢查、每日每 IP
+    次數限制（不管驗證過不過都先計次，避免被拿來狂試查詢碼）。
+    """
+    if req.method != "POST":
+        return _json_response({"ok": False, "error": "method_not_allowed"}, 405)
+
+    if not rate_limit.check_and_increment(_db(), f"upload_{_client_ip(req)}", UPLOAD_DAILY_LIMIT):
+        return _json_response({"ok": False, "error": "rate_limited"}, 429)
+
+    application_id = (req.form.get("applicationId") or "").strip()
+    query_code = (req.form.get("queryCode") or "").strip()
+    file_storage = req.files.get("signedFile")
+    if not application_id or not query_code or file_storage is None or not file_storage.filename:
+        return _json_response({"ok": False, "error": "missing_fields"}, 400)
+
+    application = applications.get_application(_db(), application_id)
+    if not application or not applications.check_query_code(application, query_code):
+        return _json_response({"ok": False, "error": "not_found"}, 404)
+
+    if not applications.can_upload_merchant_signed(application.get("status")):
+        return _json_response({"ok": False, "error": "not_accepting_upload"}, 409)
+
+    file_bytes = file_storage.read()
+    content_type = file_storage.mimetype or "application/octet-stream"
+    file_error = applications.validate_merchant_signed_file(content_type, len(file_bytes))
+    if not file_error and not applications.file_signature_matches(content_type, file_bytes):
+        file_error = "invalid_file_type"
+    if file_error:
+        return _json_response({"ok": False, "error": file_error}, 400)
+
+    ext = applications.extension_for_content_type(content_type)
+    storage_path = f"merchant-uploads/{application_id}/{int(time.time())}{ext}"
+    storage_utils.upload_bytes(storage_path, file_bytes, content_type)
+    merchant_binding.receive_file(_db(), application_id, storage_path)
+    return _json_response({"ok": True})
 
 
 @https_fn.on_request(cors=_PUBLIC_CORS, secrets=["ADMIN_SHARED_SECRET"])

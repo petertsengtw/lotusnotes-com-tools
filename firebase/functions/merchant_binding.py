@@ -104,8 +104,8 @@ def try_bind(db: firestore.Client, line_user_id: str, text: str) -> dict:
 
 
 def receive_file(db: firestore.Client, application_id: str, storage_path: str) -> None:
-    """webhook 收到已綁定使用者傳來的檔案、上傳到 Storage 後呼叫，更新申請狀態
-    （sdd5.md §4.7 步驟③、§4.8）。"""
+    """webhook 收到已綁定使用者傳來的檔案，或店家從網頁上傳（main.py upload_signed_file，
+    sdd5.md §4.7.1）、上傳到 Storage 後呼叫，更新申請狀態（sdd5.md §4.7 步驟③、§4.8）。"""
     db.collection("storeApplications").document(application_id).update({
         "merchantSignedFileUrl": storage_path,
         "merchantSignedAt": firestore.SERVER_TIMESTAMP,

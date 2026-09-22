@@ -91,3 +91,35 @@ def test_validate_merchant_signed_file():
     assert applications.validate_merchant_signed_file("application/msword", 1024) == "invalid_file_type"
     assert applications.validate_merchant_signed_file("application/pdf", 0) == "file_too_large"
     assert applications.validate_merchant_signed_file("application/pdf", applications.MAX_MERCHANT_FILE_BYTES + 1) == "file_too_large"
+
+
+def test_can_upload_merchant_signed_only_when_contract_ready_or_already_signed():
+    assert applications.can_upload_merchant_signed(applications.STATUS_CONTRACT_READY) is True
+    assert applications.can_upload_merchant_signed(applications.STATUS_MERCHANT_SIGNED) is True
+    for status in (
+        applications.STATUS_PENDING,
+        applications.STATUS_APPROVED,
+        applications.STATUS_REJECTED,
+        applications.STATUS_COMPLETED,
+        applications.STATUS_ABANDONED,
+        None,
+        "",
+    ):
+        assert applications.can_upload_merchant_signed(status) is False
+
+
+def test_file_signature_matches_real_headers():
+    assert applications.file_signature_matches("application/pdf", b"%PDF-1.7\n...")
+    assert applications.file_signature_matches("image/jpeg", b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    assert applications.file_signature_matches("image/png", b"\x89PNG\r\n\x1a\n\x00\x00")
+
+
+def test_file_signature_rejects_spoofed_content_type():
+    # 宣稱是 PDF，實際是別的東西（例如改副檔名的執行檔、純文字）
+    assert not applications.file_signature_matches("application/pdf", b"MZ\x90\x00 fake exe")
+    assert not applications.file_signature_matches("application/pdf", b"hello world")
+    # 類型跟內容對不上
+    assert not applications.file_signature_matches("image/png", b"%PDF-1.7")
+    # 不在允許清單的類型一律不通過
+    assert not applications.file_signature_matches("application/msword", b"\xd0\xcf\x11\xe0")
+    assert not applications.file_signature_matches("application/pdf", b"")

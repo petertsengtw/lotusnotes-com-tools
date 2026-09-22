@@ -239,6 +239,26 @@ flowchart TD
 
 **標籤與圖文選單（暫緩，非本次範圍）**：綁定成功後，理論上可以進一步用「連結圖文選單給使用者」這支有公開 API 的端點，讓店家看到跟同仁不同的圖文選單（例如「合約問題」「下載合約」）；至於 LINE 聊天視窗的「標籤」功能沒有對外 API，只能人工在後台手動貼，維持既有基礎功能即可，不強求自動化。這兩點目前先不做，若店家申請量變大、人工操作變得繁瑣，再回來評估。
 
+### 4.7.1 網頁上傳用印檔（主要回傳管道，2026-09-21 新增）
+
+**為什麼在 LINE 之外再加網頁上傳，而且當主要管道？** 實際檢討 LINE 流程後發現三個問題：①店家要先加好友、再在聊天視窗打「申請編號 查詢碼」才能核對身分，這串文字不直覺也記不住，是整個流程最卡的一步；②掃描檔多半在店家電腦上（掃描器/影印機掃到電腦），要傳進手機 LINE 還多一道搬檔案的手續；③不用 LINE 的店家（例如年長負責人）完全用不了。網頁上傳沒有這些問題：店家已經在 `apply_status.html` 輸入過申請編號+查詢碼查到「合約已產生」，**身分核對就是那一步，不需要再多做任何事**，選檔案按上傳即可，檔案類型/大小不對也能在頁面上當場看到錯誤。LINE 管道（§4.7）保留為選用，頁面上收合在「也可以改用 LINE 傳回」，且它還有網頁上傳取代不了的價值——未來想主動推播通知店家（見 §6）需要先有 LINE 綁定。
+
+**新增 Cloud Functions 端點：`upload_signed_file`（公開，multipart/form-data）**
+
+欄位：`applicationId`、`queryCode`、`signedFile`（檔案）。處理順序：
+
+| 步驟 | 內容 |
+|---|---|
+| ① 每日每 IP 次數限制 | 每日 20 次（key 為 `upload_{IP}_{日期}`，共用 `applyRateLimits` collection）。**驗證通過與否都先計次**，避免被拿來狂試查詢碼；比 `/apply` 的 5 次寬鬆，因為店家傳錯檔重傳也算次數 |
+| ② 身分驗證 | `applicationId` + `queryCode`（跟 `application_status` 同一套 `check_query_code`），錯誤一律回 404 `not_found`，不透露是編號錯還是碼錯 |
+| ③ 狀態檢查 | 只有 `contract_ready`（第一次上傳）跟 `merchant_signed`（傳錯想換檔重傳，以最新上傳的為準）接受上傳，其餘回 409 `not_accepting_upload`——審核中、被婉拒、已結案的申請不該讓匿名呼叫者去改動 |
+| ④ 檔案檢查 | 類型（PDF/jpg/png）、大小（20MB）跟 §4.7 LINE 管道共用 `validate_merchant_signed_file`；另外**多檢查檔頭位元組**（`%PDF`／JPEG／PNG 簽名），因為 multipart 的 Content-Type 是呼叫者自己填的，可以亂寫 |
+| ⑤ 存檔 | 跟 LINE 管道同一條路：存進 Storage `merchant-uploads/{applicationId}/{timestamp}{副檔名}`，呼叫 `merchant_binding.receive_file()` 更新 `merchantSignedFileUrl`／`merchantSignedAt` 並把狀態轉 `merchant_signed`。舊檔案不刪除，只是申請紀錄改指向最新的 |
+
+**前端（`apply_status.html`）**：查到 `contract_ready` 時，下載按鈕下方顯示「下一步：上傳蓋好章的合約」（三步驟說明＋檔案選擇＋上傳按鈕），LINE 選項收合在下面；查到 `merchant_signed` 時顯示「傳錯檔案了？可以重新上傳」。前端也先檢查類型/大小給即時回饋，但**真正把關的是後端**。
+
+**最終雙方用印完成的合約怎麼傳回店家**：不因網頁上傳而改變設計——維持人工處理（§4.8）。店家有綁 LINE 的話在 LINE Official Account Manager 後台傳；沒有的話直接用申請表單上留的 Email 寄給店家（人工寄一封信，量小，不值得為此開發下載機制）。
+
 ### 4.8 用印回傳與結案流程
 
 延續 §4.7 的身分綁定，實際的用印往返步驟：
@@ -290,6 +310,7 @@ flowchart TD
 - **`line_webhook` 必須驗證 LINE 簽章**（`X-Line-Signature`，HMAC-SHA256 用 Channel Secret 計算後比對），沒有驗證的話任何人都可以偽造 webhook payload，冒充店家傳假檔案或惡意內容進來。
 - **身分綁定（申請編號+查詢碼）需要節流**：同一個 LINE userId 連續輸入錯誤達上限次數後應暫時鎖定，比照 §5.2 `codeAttempts` 的精神，避免有人用聊天視窗窮舉猜測其他店家的查詢碼。
 - **接收店家上傳的檔案需要驗證類型與大小**：只接受 PDF/常見圖片格式（jpg/png），且需要合理大小上限（例如 20MB），避免有人傳來路不明的執行檔或超大檔案塞爆 Firebase Storage。
+- **`upload_signed_file`（網頁上傳用印檔，§4.7.1）是第三個匿名檔案上傳入口**：防護靠申請編號+查詢碼驗證、狀態限制（僅 `contract_ready`／`merchant_signed`）、類型+大小+檔頭位元組檢查、每日每 IP 20 次限制（驗證失敗也計次）。查詢碼外洩的話，拿到的人可以上傳檔案取代店家的用印檔（舊檔仍保留在 Storage、只是申請紀錄改指向新的），所以職工福利小組檢查用印檔時仍要人工看內容，不能因為是「系統收到的」就當作可信。
 - **未完成綁定前不可接受任何檔案**：`line_webhook` 收到檔案訊息時務必先確認該 LINE userId 已綁定成功的 `applicationId`，否則檔案來源身分不明，無法歸檔也不該收下。
 - **`apply` 端點的自有合約書上傳也是完全公開、無需登入**：跟 §4.7 LINE 檔案接收一樣，需要驗證檔案類型（僅接受 PDF/Word）與大小上限（例如 10MB），避免有人上傳來路不明的執行檔或超大檔案；這是本設計第二個會接受外部匿名檔案上傳的入口，兩處驗證邏輯應該共用同一份檢查函式，避免各自維護、之後改壞其中一處沒同步。
 
@@ -341,6 +362,13 @@ flowchart TD
 - [x] `line_webhook` 沒有正確簽章的請求會被拒絕（400）——已實測（未帶簽章、假簽章皆正確拒絕；真實 LINE 簽章的請求正確通過）
 - [ ] 職工福利小組用 `apply_review.py --status merchant_signed` 可以下載檢查店家回傳的用印檔案，確認後標記完成（`completed`）——底層的 `admin_update_status`／`download_file(kind=merchant_signed)` 端點已實測正確，但 `apply_review.py` 這個互動流程本身還沒有人實際跑過一次
 - [ ] `apply_review.py --abandon <申請編號>` 可以正確把申請標記為 `abandoned`——尚未實測
+
+**網頁上傳用印檔（§4.7.1，2026-09-21 新增）**：
+- [x] 帶正確申請編號+查詢碼、狀態為可上傳時，上傳合法 PDF/圖片成功，狀態為 `merchant_signed`，`download_file(kind=merchant_signed)` 讀回內容正確——已對正式環境實測（用測試申請 `20260911-02` 上傳 PDF，admin 讀回內容一致）
+- [x] 查詢碼錯誤回 404、狀態不是 `contract_ready`／`merchant_signed` 回 409、沒帶檔案回 400——已對正式環境實測（GET 回 405 也確認），CORS 標頭正確
+- [x] 檔案類型不合、宣稱 PDF 但檔頭不符、超過 20MB 都被拒絕——已對正式環境實測
+- [ ] 同一 IP 超過每日 20 次回 429——尚未實測（測試會用光該 IP 當天額度，醫院對外 IP 是共用的，刻意沒測）
+- [ ] `apply_status.html` 上傳區塊用真實瀏覽器（電腦＋手機）操作一輪，錯誤訊息顯示正確——已部署上線，尚未有人實際操作過畫面
 
 ## 附錄 A：個人資料蒐集、處理及利用告知事項（草稿，待法務確認）
 

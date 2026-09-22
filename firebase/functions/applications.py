@@ -99,6 +99,29 @@ def validate_merchant_signed_file(content_type: str, size: int) -> str | None:
     return None
 
 
+# 網頁上傳用印檔（sdd5.md §4.7.1）：只有「合約已備妥」（第一次上傳）跟「店家已回傳」
+# （傳錯檔案想換掉重傳）這兩個狀態接受上傳；審核中、被婉拒、已結案等狀態上傳沒有
+# 意義，也不該讓匿名呼叫者去改動已經走完流程的申請。
+UPLOAD_ACCEPTING_STATUSES = (STATUS_CONTRACT_READY, STATUS_MERCHANT_SIGNED)
+
+# multipart 的 Content-Type 是瀏覽器/呼叫者自己填的，可以亂寫，所以另外檢查檔案開頭
+# 的位元組（magic bytes）是否跟宣稱的類型相符。
+_FILE_SIGNATURES = {
+    "application/pdf": b"%PDF",
+    "image/jpeg": b"\xff\xd8\xff",
+    "image/png": b"\x89PNG\r\n\x1a\n",
+}
+
+
+def can_upload_merchant_signed(status: str | None) -> bool:
+    return status in UPLOAD_ACCEPTING_STATUSES
+
+
+def file_signature_matches(content_type: str, file_bytes: bytes) -> bool:
+    signature = _FILE_SIGNATURES.get(content_type)
+    return bool(signature) and file_bytes.startswith(signature)
+
+
 def validate_application_fields(data: dict) -> str | None:
     """回傳 None 表示通過，否則回傳一個機器可讀的錯誤代碼。前端/後端都要驗證一次
     （sdd5.md §5：apply 是完全公開的端點，不能只信任前端）。"""
