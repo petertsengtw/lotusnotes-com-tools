@@ -51,6 +51,16 @@
   .result-box .status-line { font-size: 1.15rem; font-weight: 700; color: var(--primary); margin-bottom: 8px; }
   .result-box .store-name { color: var(--muted); margin-bottom: 12px; }
   .result-box .note { font-size: 0.9rem; color: var(--text); margin-top: 10px; }
+  .step-banner {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--accent);
+    font-size: 0.88rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
   .result-box a.download {
     display: inline-block;
     margin-top: 14px;
@@ -107,7 +117,7 @@
   <header>
     <h1>花蓮慈濟醫院特約商店加入申請</h1>
     <div class="rule"></div>
-    <div class="subtitle">查詢加入特約申請進度</div>
+    <div class="subtitle">查詢進度、下載合約、回傳用印文件都在這裡</div>
   </header>
   <nav class="tabs">
     <a href="./join.html">加入特約</a>
@@ -117,7 +127,7 @@
 
   <div id="query-view" class="panel">
     <h2>查詢申請進度</h2>
-    <p class="hint">請輸入送出申請時取得的申請編號與查詢碼。</p>
+    <p class="hint">請輸入送出申請時取得的申請編號與查詢碼。之後合約備妥、需要回傳蓋好章的合約時，也是回來同一個網址、輸入同樣的編號與查詢碼操作，請先保留好。</p>
     <div class="query-box">
       <label for="applicationId">申請編號</label>
       <input type="text" id="applicationId" placeholder="例：20260909-03" autocomplete="off">
@@ -213,7 +223,21 @@ function renderResult(data, applicationId, queryCode) {
     extra.appendChild(note);
   }
 
+  if (data.status === "pending" || data.status === "approved") {
+    // 這個階段還沒有動作可做，但提醒店家「之後」要回來同一頁，避免他們以為
+    // 合約備妥後會有別的頁面或會收到通知（目前系統不會主動通知，見 sdd5.md §6）。
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "合約備妥後，請用同一個申請編號與查詢碼回來這個頁面，下載合約並上傳蓋好章的檔案，都在這一頁完成。";
+    extra.appendChild(note);
+  }
+
   if (data.status === "contract_ready") {
+    const banner = document.createElement("div");
+    banner.className = "step-banner";
+    banner.innerHTML = "<strong>接下來請完成：</strong>① 下載合約　② 列印蓋章掃描　③ 在下方直接上傳，都在這一頁完成，不用另外找頁面。";
+    extra.appendChild(banner);
+
     const url = data.contractSource === "own_template"
       ? `${FUNCTIONS_BASE_URL}/download_file?applicationId=${encodeURIComponent(applicationId)}&queryCode=${encodeURIComponent(queryCode)}&kind=own_template`
       : data.contractUrl;
@@ -221,7 +245,7 @@ function renderResult(data, applicationId, queryCode) {
       const a = document.createElement("a");
       a.className = "download";
       a.href = url;
-      a.textContent = "下載合約 PDF";
+      a.textContent = "① 下載合約 PDF";
       a.target = "_blank";
       a.rel = "noopener";
       extra.appendChild(a);
@@ -252,7 +276,7 @@ function buildUploadBox(applicationId, queryCode, isReupload) {
   box.className = "next-box";
 
   const h = document.createElement("h3");
-  h.textContent = isReupload ? "傳錯檔案了？可以重新上傳" : "下一步：上傳蓋好章的合約";
+  h.textContent = isReupload ? "傳錯檔案了？可以重新上傳" : "③ 上傳蓋好章的合約";
   box.appendChild(h);
 
   if (isReupload) {
@@ -261,17 +285,10 @@ function buildUploadBox(applicationId, queryCode, isReupload) {
     p.textContent = "重新上傳後，會以最新上傳的檔案為準。";
     box.appendChild(p);
   } else {
-    const ol = document.createElement("ol");
-    [
-      "下載合約、列印，蓋好公司大小章與負責人簽名",
-      "掃描成一個 PDF（多頁請合併成同一個檔案，或直接拍照上傳 JPG/PNG）",
-      "在下方選擇檔案，按「上傳」",
-    ].forEach((t) => {
-      const li = document.createElement("li");
-      li.textContent = t;
-      ol.appendChild(li);
-    });
-    box.appendChild(ol);
+    const p = document.createElement("p");
+    p.className = "small";
+    p.textContent = "掃描成一個 PDF（多頁請合併成同一個檔案），或直接拍照上傳 JPG/PNG。";
+    box.appendChild(p);
   }
 
   const input = document.createElement("input");
