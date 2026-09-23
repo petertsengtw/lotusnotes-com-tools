@@ -12,7 +12,7 @@ load_dotenv()
 
 SERVER     = "mdaapa/medicine/Tzuchi"
 DB_PATH    = r"OAuse\mddpdoc.nsf"
-OUTPUT_DIR = r"c:\Users\peter\Desktop\autoRPA2-lotusNotesAPI\output"
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 CHECKLIST  = os.path.join(OUTPUT_DIR, "checklist.json")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)

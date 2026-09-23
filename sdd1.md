@@ -34,7 +34,7 @@
 |---|---|
 | 資料來源 | Notes 伺服器 `mdaapa/medicine/Tzuchi`，資料庫 `OAuse\mddpdoc.nsf`，View「新聞稿」 |
 | 篩選條件 | 文件 `fd_Date` 欄位落在使用者輸入的起訖日期區間內（含當天，結束日補到 23:59:59） |
-| 輸出位置 | `OUTPUT_DIR`（目前寫死 `c:\Users\peter\Desktop\autoRPA2-lotusNotesAPI\output`，見「7. 已知問題」） |
+| 輸出位置 | `OUTPUT_DIR`＝專案根目錄下的 `output/`（依腳本所在位置推算，已排除於 git 之外） |
 | 輸出結構 | 每篇一個資料夾 `YYYYMMDD_標題前50字`，內含 `content.txt`（標題+分隔線+內文）與 `img_000.jpg`…（依 DXL 匯出解出的內嵌圖片，支援 jpeg/gif/png） |
 | 去重機制 | 雙重比對：① UNID 是否已存在 `checklist.json` ② 對應資料夾是否已存在 `content.txt`，符合任一項即跳過（第②項會補登 checklist，避免資料夾在但清單漏記） |
 | Checklist 欄位 | `date`／`subject`／`folder`／`chars`／`images`／`downloaded_at`（此階段還沒有 `joomla_id`） |
@@ -101,7 +101,7 @@ flowchart TD
 | 7.2 | `text_to_html()` 未對內文做 HTML escape | 中（版面錯亂／潛在標籤污染） | 轉換前加 `html.escape()` |
 | 7.3 | 上傳狀態只存在本機 `checklist.json`，不會回頭核對 Joomla 現有文章 | 中（檔案遺失或誤刪會導致重複建立草稿） | 上傳前可加一道用標題+日期查詢 Joomla API 的防重複檢查 |
 | 7.4 | 只印在終端機，沒有落地 log 檔 | 中（無法排程、事後無法追查失敗原因） | 比照 `auto_checkin.py` 加 `checkin.log` 模式的 log 檔 |
-| 7.5 | `OUTPUT_DIR` 寫死成舊專案路徑 `autoRPA2-lotusNotesAPI\output`，與現在的專案資料夾（`autowork-lotusNotesCOM`）不一致 | 低（目前兩支腳本用同一條寫死路徑還接得起來，但一旦路徑失效兩邊會同時壞掉） | 改成 `os.path.join(os.path.dirname(__file__), "output")` |
+| ~~7.5~~ | ~~`OUTPUT_DIR` 寫死成舊專案路徑 `autoRPA2-lotusNotesAPI\output`~~ **已解決（2026-09-23）**：換電腦後路徑失效，`query_news.py`／`upload_joomla.py` 已改成 `os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")` | — | — |
 
 ## 8. 驗收標準
 

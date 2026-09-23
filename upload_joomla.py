@@ -18,7 +18,7 @@ JOOMLA_URL   = os.getenv("JOOMLA_URL", "").rstrip("/")
 JOOMLA_TOKEN = os.getenv("JOOMLA_TOKEN", "")
 CATEGORY_ID  = int(os.getenv("JOOMLA_CATEGORY_ID", "8"))
 MEDIA_FOLDER = os.getenv("JOOMLA_MEDIA_FOLDER", "images/news").strip("/")
-OUTPUT_DIR   = r"c:\Users\peter\Desktop\autoRPA2-lotusNotesAPI\output"
+OUTPUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 CHECKLIST    = os.path.join(OUTPUT_DIR, "checklist.json")
 
 API_BASE = f"{JOOMLA_URL}/api/index.php/v1"

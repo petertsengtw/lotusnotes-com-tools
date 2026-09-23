@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 checkin.log
 holidays.txt
+/output/
 store/output/
 bulletin/output/
 .pytest_cache/
