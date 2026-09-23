@@ -7,13 +7,15 @@
 - **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章
 - **功能四・特約商店查詢頁**：從 Notes 資料庫匯出特約商店優惠清單，部署成一個**限本院同仁使用**的查詢頁；同仁透過 LINE 官方帳號（LINE@）加好友、在 LIFF 頁完成身分綁定驗證後即可查詢，後端為 Firebase Cloud Functions + Firestore
 - **功能五・福利公告查詢**：從院內公佈欄匯出職工福利行政小組發布的公告（含圖片），部署成另一個限本院同仁使用的查詢頁，跟功能四共用同一套 LINE 身分驗證，但公告資料存在 Ubuntu 網站伺服器，不進 Firebase
-- **功能六・特約商店線上申請**：店家線上填表申請加入特約（可選用本院合約範本或直接上傳自有合約書），職工福利小組審核後續接手產生/核准合約，取代原本純電話/Email 聯繫的方式，詳見 `sdd5.md`
+- **功能六・特約商店線上申請**：店家線上填表申請加入特約（可選用本院合約範本或直接上傳自有合約書），職工福利小組審核後續接手產生/核准合約，店家蓋章後可直接在網頁上傳或透過 LINE 官方帳號回傳掃描檔，取代原本純電話/Email 聯繫的方式，詳見 `sdd5.md`
 
 各功能的詳細說明見下方對應章節。
 
 ---
 
 ## 系統流程圖
+
+> 下圖涵蓋功能一～五。功能六（特約商店線上申請，含表單、審核、合約套版、LINE 綁定與用印回傳）自成一套較複雜的流程，畫在 `sdd5.md` 開頭的流程圖裡，不重複畫在這裡。
 
 ```mermaid
 flowchart TD
@@ -296,9 +298,19 @@ cd firebase
 firebase deploy --only functions
 ```
 
-如果改到 `firestore.rules`/`firestore.indexes.json`，記得加上 `firestore:rules,firestore:indexes`。secrets（`ADMIN_SHARED_SECRET`、`LINE_LOGIN_CHANNEL_ID`）已經設定在 Cloud Functions 那端，改密鑰才需要重跑 `firebase functions:secrets:set`。
+如果改到 `firestore.rules`/`firestore.indexes.json`，記得加上 `firestore:rules,firestore:indexes`。secrets（`ADMIN_SHARED_SECRET`、`LINE_LOGIN_CHANNEL_ID`、`BULLETIN_SECRET_SLUG`、`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`）已經設定在 Cloud Functions 那端，改密鑰才需要重跑 `firebase functions:secrets:set 密鑰名稱`。
 
-**`.env` 欄位（本機腳本用，不含任何 Firebase 憑證）：**
+**`firebase/functions/.env`（部署 Cloud Functions 用，跟著程式碼一起部署，不是 secret）：**
+
+```
+ALLOWED_ORIGIN=https://hlm.tzuchi.com.tw
+BULLETIN_BASE_URL=（Ubuntu 網站伺服器上，公告 JSON 所在目錄的網址前綴，見「功能五」）
+STORAGE_BUCKET_NAME=hlwelfare.firebasestorage.app
+```
+
+> 這個變數不能叫 `FIREBASE_STORAGE_BUCKET`——`firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_`／`X_GOOGLE_`／`EXT_`／`KIT_` 開頭的變數名稱（保留字首），實測部署失敗才改名為 `STORAGE_BUCKET_NAME`。
+
+**`.env`（根目錄，本機腳本用，不含任何 Firebase 憑證）：**
 
 ```
 STORE_AUTH_FUNCTIONS_BASE_URL=https://us-central1-hlwelfare.cloudfunctions.net
@@ -442,9 +454,10 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 | `bulletin/deploy_bulletin.py` | 匯出公告 JSON + 圖片，透過 SSH 金鑰部署到 Ubuntu 網站伺服器（見「功能五」） |
 | `sync_all.py` | 一次跑完 `store/sync_stores_to_firestore.py` + `bulletin/deploy_bulletin.py`，Lotus 資料更新後的日常同步用這支就好 |
 | `store/deploy_apply.py` | 部署 `store/web/apply.html`、`apply_status.html` 到 Ubuntu 網站伺服器（見「功能六」） |
-| `store/apply_review.py` | 互動式審核特約商店線上申請，含統一編號查證提示 |
+| `store/apply_review.py` | 互動式審核特約商店線上申請，含統一編號查證提示；`--status merchant_signed` 核對店家已回傳的用印檔案、`--abandon` 標記放棄、`--find` 用店名/統編/電話搜尋顯示申請編號與查詢碼（店家忘記時用） |
 | `store/tax_id_lookup.py` | 共用模組：呼叫經濟部開放資料 API 查證統一編號是否真實存在 |
 | `store/prepare_contract_template.py` | 一次性把 `template-store.doc` 轉成含 `{{...}}` 佔位符的套版範本，範本改版才需要重跑 |
+| `store/preview_contract.py` | 用假資料快速套一次版並自動開啟 PDF，改範本後排版調整/確認用，不需要 Firebase/SSH 相關 `.env` 設定 |
 | `store/generate_contracts.py` | 把已核准（慈濟醫院合約範本）的申請套版產生 PDF，上傳到網站伺服器並回寫下載網址 |
 
 ---
