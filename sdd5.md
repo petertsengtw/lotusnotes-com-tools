@@ -360,7 +360,7 @@ flowchart TD
 - [x] `contractSource == "own_template"` 的申請一經核准，`contractUrl` 立即等於 `ownTemplateStoragePath`、狀態直接變 `contract_ready`，不會誤跑套版流程——已實測
 - [x] 申請人用 `applicationId` + `queryCode` 可在 `apply_status.html`（背後的 `application_status`／`download_file` 端點）查到「合約已產生」並下載（兩種合約來源皆可）——已實測，`apply_status.html` 網頁本身尚未有人實際點過
 - [x] 查詢碼錯誤时一律回「查無資料」，不透露是編號錯還是碼錯——已實測（`application_status`、`download_file` 都測過）
-- [ ] 職工福利小組可標記「店家已回傳用印」「雙方用印完成」，並記錄最終檔案下載網址（選填）——這幾個狀態轉換屬於 §4.7/§4.8（第三階段）範圍，`admin_update_status` 端點尚未實作
+- [ ] 職工福利小組可標記「店家已回傳用印」「雙方用印完成」，並記錄最終檔案下載網址（選填）——這幾個狀態轉換屬於 §4.7/§4.8（第三階段）範圍，`admin_update_status` 端點已實作並實測正確（見下方第三階段最後兩項），但透過 `apply_review.py` 操作的互動流程本身還沒有人實際跑過一次
 
 **LINE 身分綁定與用印檔案回傳（第三階段）**——已完成 LINE Developers Console 設定（取得 `LINE_CHANNEL_SECRET`／`LINE_CHANNEL_ACCESS_TOKEN`、Messaging API 頻道獨立於既有的 LINE Login 頻道之外另外啟用、設定 Webhook URL 並開啟）、部署上線，且**用真實 LINE 帳號跑過核心流程**：
 - [x] 店家加入 LINE 官方帳號後，在聊天視窗輸入正確的申請編號+查詢碼可以完成綁定，並收到確認回覆——已用真實裝置實測（收到「已確認您是『測試商店-請忽略』」回覆）

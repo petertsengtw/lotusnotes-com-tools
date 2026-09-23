@@ -88,7 +88,7 @@ flowchart TD
 |---|---|
 | 作業系統 | Windows（僅限，依賴 COM API） |
 | Python | 3.x **32-bit**（配合 Lotus Notes 8.5.3 32-bit） |
-| Lotus Notes | 8.5.3，需在背景保持登入狀態 |
+| Notes 用戶端 | HCL Notes 12（32-bit，原為 Lotus Notes 8.5.3，2026-09 換機後改用），執行腳本時用戶端**需關閉**，見「注意事項」 |
 | 虛擬環境 | `venv32`（32-bit Python） |
 
 ---
@@ -372,7 +372,7 @@ venv32\Scripts\python.exe sync_all.py
 
 ## 功能六：特約商店線上申請（`store/`，見 `sdd5.md`）
 
-取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；核准後店家可加入 LINE 官方帳號完成身分核對，之後用印完成直接在 LINE 傳回掃描檔即可，不用寄 Email。**Phase 1、Phase 2、Phase 3 都已部署到正式環境，核心流程用真實資料/真實 LINE 帳號驗收通過**（2026-09-14）。詳見 `sdd5.md` §7 各項勾選狀態。
+取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；店家用印完成後，直接回到 `apply_status.html` 同一頁上傳掃描檔即可（主要管道，見 `sdd5.md` §4.7.1），也可以改加入 LINE 官方帳號完成身分核對後在聊天視窗傳回，不用寄 Email。**Phase 1、Phase 2、Phase 3 都已部署到正式環境，核心流程用真實資料/真實 LINE 帳號驗收通過**（2026-09-14）。詳見 `sdd5.md` §7 各項勾選狀態。
 
 ```powershell
 # 部署 apply.html / apply_status.html 到 Ubuntu 網站伺服器
@@ -475,14 +475,15 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 
 ### 清理
 
-- [ ] 刪除 `test_image_extract.py`（開發期間的診斷腳本，已無用途）
+- [x] 刪除 `test_image_extract.py`（開發期間的診斷腳本，已無用途）
 - [x] 刪除 `debug_portal.py`、`test_portal_line.py`（開發期間的診斷腳本，已無用途）
 
 ---
 
 ## 注意事項
 
-- **Lotus Notes 必須安裝在系統上**，但不需要保持開啟或登入；`Initialize(password)` 會直接透過後端 COM API 建立 session
+- **Notes 必須安裝在系統上**，但不需要保持開啟或登入；`Initialize(password)` 會直接透過後端 COM API 建立 session
+- **HCL Notes 12 用戶端開著時，腳本會失敗**（`Notes 錯誤: ID 檔被其它的處理鎖住`）：用戶端會佔住 ID 檔，跟舊的 Lotus Notes 8.5.3 行為不同，執行腳本（含打卡排程）前要先關閉用戶端；`Initialize("")` 不帶密碼也不會沿用用戶端登入狀態，而是卡在主控台等輸入密碼
 - win32com 存入 datetime 時會自動轉 UTC，程式內已用 `+timedelta(hours=8)` 補回台灣時區
 - 打卡文件建立後**無法刪除或修改**（ACL 限制），請確認時間正確再執行
 - `upload_joomla.py` 使用 `verify=False` 略過 SSL 驗證（因應醫院內網自簽憑證）
