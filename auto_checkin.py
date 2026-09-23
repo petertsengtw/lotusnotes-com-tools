@@ -106,6 +106,14 @@ def checkin(status: str):
     except Exception as e:
         logging.error(f"{label} 失敗: {e}")
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {label} 失敗: {e}")
+        # 排程失敗時原本只寫 log，沒人會發現；先登入 portal 取得對外上網權限，
+        # 才能送出 LINE 通知
+        hint = "請關閉 HCL Notes 用戶端後手動執行" if "鎖住" in str(e) else "請查看 checkin.log"
+        portal_login()
+        send_line_message(
+            f"[自動簽到退] ⚠️ {label} 失敗 {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            f"{e}\n{hint}；補打前先確認 Notes 裡沒有這筆紀錄（打卡紀錄無法刪除）"
+        )
         sys.exit(1)
 
 
