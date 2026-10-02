@@ -57,6 +57,8 @@ MENU = [
     ("查詢與維護", [
         {"title": "查詢特約商店", "desc": "互動式查詢，可依類別篩選並輸出 CSV",
          "script": "store/query_store.py"},
+        {"title": "特約商店到期檢查", "desc": "列出已過期、60 天內到期的店家（只讀，需先關閉 Notes）",
+         "script": "store/expiry_report.py"},
         {"title": "產生新增特約商店公告圖", "desc": "Notes 新增店家後，產生全院公告用的圖檔（store/output/，需先關閉 Notes）",
          "script": "store/make_announcement.py", "prompts": [("店名關鍵字", "--from-notes")]},
         {"title": "查詢打卡紀錄", "desc": "查詢指定日期區間的打卡紀錄",

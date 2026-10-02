@@ -10,8 +10,9 @@ DB_PATH = r"OAUse\ContributingStore.nsf"
 VIEW    = "依商店"
 
 
-def fetch_active_stores():
-    """回傳未作廢、未過期的特約商店清單（依類別、名稱排序），expire 為 ISO 日期字串或 None"""
+def fetch_active_stores(include_expired: bool = False):
+    """回傳未作廢、未過期的特約商店清單（依類別、名稱排序），expire 為 ISO 日期字串或 None。
+    include_expired=True 時連已過期（但未作廢）的也一起回傳，給 expiry_report.py 到期提醒用。"""
     notes = win32com.client.Dispatch("Lotus.NotesSession")
     notes.Initialize(os.getenv("NOTES_PASSWORD", ""))
     db = notes.GetDatabase(SERVER, DB_PATH)
@@ -36,7 +37,7 @@ def fetch_active_stores():
             if change_date and hasattr(change_date[0], "year"):
                 t = change_date[0]
                 expire_date = (datetime(t.year, t.month, t.day) + timedelta(hours=8)).date()
-                if expire_date < today:
+                if expire_date < today and not include_expired:
                     e = col.GetNextEntry(e)
                     continue
 
