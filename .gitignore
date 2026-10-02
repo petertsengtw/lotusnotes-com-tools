@@ -11,3 +11,4 @@ bulletin/output/
 .pytest_cache/
 firebase/*-debug.log
 firebase/.firebase/
+store/TODO.md
