@@ -58,6 +58,11 @@ def classify(stores, today, days, expired_days):
     return expired, expiring, stale
 
 
+def one_line(text):
+    """Notes 欄位常有多行（例如電話寫了好幾支），報表裡壓成一行。"""
+    return " / ".join(part.strip() for part in (text or "").splitlines() if part.strip())
+
+
 def line_of(s):
     if s["days"] < 0:
         return f"・{s['name']}（{s['kind']}）{s['expire']} 到期，已過 {-s['days']} 天"
@@ -69,10 +74,10 @@ def print_report(expired, expiring, stale, today, days, expired_days):
     print("=" * 60)
     print(f"\n【已過期，同仁查詢頁已看不到】{len(expired)} 家（最近 {expired_days} 天內到期）")
     for s in expired:
-        print("  " + line_of(s) + f"　電話：{s['tel'].strip()}")
+        print("  " + line_of(s) + f"　電話：{one_line(s['tel']) or '（未填）'}")
     print(f"\n【{days} 天內到期】{len(expiring)} 家")
     for s in expiring:
-        print("  " + line_of(s) + f"　電話：{s['tel'].strip()}")
+        print("  " + line_of(s) + f"　電話：{one_line(s['tel']) or '（未填）'}")
     if stale:
         print(f"\n另有 {stale} 家過期超過 {expired_days} 天仍未在 Notes 標記作廢（可用 --expired-days 調大範圍列出）")
     print("\n提醒：合約第六條規定屆滿前一個月未書面通知不續約即自動延長一年；"
