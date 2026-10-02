@@ -57,6 +57,8 @@ MENU = [
     ("查詢與維護", [
         {"title": "查詢特約商店", "desc": "互動式查詢，可依類別篩選並輸出 CSV",
          "script": "store/query_store.py"},
+        {"title": "產生新增特約商店公告圖", "desc": "Notes 新增店家後，產生全院公告用的圖檔（store/output/，需先關閉 Notes）",
+         "script": "store/make_announcement.py", "prompts": [("店名關鍵字", "--from-notes")]},
         {"title": "查詢打卡紀錄", "desc": "查詢指定日期區間的打卡紀錄",
          "script": "query_checkin.py"},
         {"title": "換新驗證碼", "desc": "換一組期效性驗證碼並印出，供張貼公佈欄",
