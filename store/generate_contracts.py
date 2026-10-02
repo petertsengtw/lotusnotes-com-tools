@@ -99,15 +99,25 @@ def roc_date_parts(iso_date: str) -> tuple[str, str, str]:
 
 
 def replace_all(doc, target: str, replacement: str):
+    # 不能用 Find.Replacement.Text：Word 規定「取代為」最多 255 字元，優惠內容寫得
+    # 詳細一點就會超過（2026-10-01 永諦工程行 293 字，報「字串參數太長」）。
+    # 改成逐一找到佔位符後直接改寫該 Range 的文字，沒有長度限制。
+    # 換行統一轉成段落內換行（\x0b），跟範本「優惠：」後面那個換行同一種，條列項目
+    # 逐行呈現，又不會多出段落影響後面的段落編號。
+    replacement = replacement.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\x0b")
     rng = doc.Content
     f = rng.Find
     f.ClearFormatting()
     f.Text = target
-    f.Replacement.ClearFormatting()
-    f.Replacement.Text = replacement
     f.Forward = True
-    f.Wrap = 1  # wdFindContinue：這裡要換掉全文件裡「每一個」出現的地方
-    if not f.Execute(Replace=2):  # wdReplaceAll
+    f.Wrap = 0  # wdFindStop：從頭找到尾就停，搭配下面的迴圈換掉「每一個」出現的地方
+    f.MatchWildcards = False
+    count = 0
+    while f.Execute():
+        rng.Text = replacement
+        rng.Collapse(0)  # wdCollapseEnd：從剛換好的文字後面繼續找
+        count += 1
+    if count == 0:
         raise SystemExit(f"範本裡找不到佔位符 {target!r}，範本檔案可能損壞或版本不對，請重新跑 prepare_contract_template.py")
 
 
