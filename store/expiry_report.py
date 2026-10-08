@@ -35,13 +35,31 @@ STATE_FILE = os.path.join(OUTPUT_DIR, "expiry_notified.json")
 LINE_MAX_CHARS = 4800  # LINE 單則文字上限 5000，留一點餘裕
 
 
+def name_key(name):
+    """比對同一家店用：去掉所有空白（含全形），避免新舊合約店名空格不一致。"""
+    return "".join((name or "").split())
+
+
+def latest_contracts(stores):
+    """同一家店只留到期日最晚的那份合約。
+    重新簽約時 Notes 是新建一份文件，舊合約文件會留在「8.過期」檢視，不處理的話同一家店
+    會同時出現在「已過期」和現行清單（例如真豪足體養身館）。沒有到期日視為不會到期，最優先。"""
+    latest = {}
+    for s in stores:
+        key = name_key(s["name"])
+        cur = latest.get(key)
+        if cur is None or (s["expire"] or "9999-12-31") > (cur["expire"] or "9999-12-31"):
+            latest[key] = s
+    return list(latest.values())
+
+
 def classify(stores, today, days, expired_days):
-    """回傳 (expired, expiring, stale_count)。
+    """回傳 (expired, expiring, stale_count)。同一家店只看最新一份合約（見 latest_contracts）。
     expired：最近 expired_days 天內到期、尚未作廢的店家（同仁查詢頁已看不到）
     expiring：今天起 days 天內到期的店家
     stale_count：過期超過 expired_days 天仍未作廢的店家數（多半是早就不合作、Notes 沒標作廢）"""
     expired, expiring, stale = [], [], 0
-    for s in stores:
+    for s in latest_contracts(stores):
         if not s["expire"]:
             continue
         exp = date.fromisoformat(s["expire"])
