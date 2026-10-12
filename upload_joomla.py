@@ -44,8 +44,43 @@ def save_checklist(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# 人工上稿不放進內文的行：標題（另外比對）、Notes 表頭的「紀錄:」、文末的撰文者／報導
+SKIP_LINE = re.compile(r'^(紀錄[:：]|撰文者?[:：]|報\s*導[:：])')
+
+
+def layout_to_html(blocks, title, img_tags):
+    """layout.json → HTML，排版比照人工上稿：
+    圖片照 Notes 原本的位置放、同一段的圖片放同一個 <p>；圖說（緊接在圖片後的文字段）用 <br /> 合併在圖片下方；
+    空行分段、去掉段首全形空白；略過標題、紀錄、撰文者、報導
+    img_tags: {檔名: <img> 標籤}"""
+    paras, cur = [], []
+
+    def flush():
+        if cur:
+            paras.append("<p>" + "<br />".join(cur) + "</p>")
+            cur.clear()
+
+    for b in blocks:
+        if b["type"] == "images":
+            flush()
+            tags = [img_tags[f] for f in b["files"] if f in img_tags]
+            if tags:
+                paras.append("<p>" + "".join(tags) + "</p>")
+            continue
+        for line in b["text"].split("\n"):
+            line = line.strip()          # str.strip() 會一併去掉全形空白
+            if not line:
+                flush()
+            elif SKIP_LINE.match(line) or re.sub(r'\s+', '', line) == re.sub(r'\s+', '', title):
+                continue
+            else:
+                cur.append(html.escape(line, quote=False))
+    flush()
+    return "\n".join(paras)
+
+
 def text_to_html(content_txt):
-    """content.txt → HTML（略過標題行與分隔線）"""
+    """content.txt → HTML（略過標題行與分隔線）；舊的下載沒有 layout.json 時才用"""
     lines = content_txt.split("\n")
     # 格式: 第1行=標題, 第2行=====, 第3行空白, 之後=內文
     body_text = "\n".join(lines[3:]).strip() if len(lines) > 3 else content_txt
@@ -82,7 +117,7 @@ def find_existing_article(title):
 def upload_image(local_path, media_path):
     """上傳圖片到 Joomla 媒體庫
     media_path: 相對於 Joomla 根目錄，例如 images/01news/2026/05/0513/img_000.jpg
-    回傳 (完整圖片 URL, 摘要圖片欄位值)
+    回傳 (完整圖片 URL, 摘要圖片欄位值, 內文用的 <img> 標籤)
     """
     # Media API 的 path 要寫成「adapter:/路徑」，local-images 的根目錄已經是 images/，
     # 直接送 images/... 會被存成 images/images/...（2026-10-12 實測）
@@ -99,8 +134,12 @@ def upload_image(local_path, media_path):
     }
     r = requests.post(f"{API_BASE}/media/files", headers=HEADERS, json=payload, timeout=30, verify=False)
     r.raise_for_status()
-    url = f"{JOOMLA_URL}/{media_path}"
-    return url, intro_image_value(url, adapter_path, r.json()["data"]["attributes"])
+    url   = f"{JOOMLA_URL}/{media_path}"
+    attrs = r.json()["data"]["attributes"]
+    size  = f' width="{attrs["width"]}" height="{attrs["height"]}"' if attrs.get("width") and attrs.get("height") else ""
+    # 內文圖片用相對路徑，比照人工上稿
+    return url, intro_image_value(url, adapter_path, attrs), f'<img src="{media_path}" alt=""{size} />'
+
 
 
 def intro_image_value(url, adapter_path, attrs):
@@ -226,6 +265,7 @@ for unid, entry in pending:
     img_subdir      = f"{MEDIA_FOLDER}/{year}/{mon}/{mon}{day}/{unid_short}"
 
     img_urls    = []
+    img_tags    = {}
     intro_image = ""
     img_files = sorted(
         f for f in os.listdir(folder)
@@ -235,7 +275,7 @@ for unid, entry in pending:
         media_path = f"{img_subdir}/{img_file}"   # e.g. images/01news/2026/05/0513/img_000.jpg
         local_path = os.path.join(folder, img_file)
         try:
-            url, intro_value = upload_image(local_path, media_path)
+            url, intro_value, img_tags[img_file] = upload_image(local_path, media_path)
             img_urls.append(url)
             if not intro_image:            # 第一張圖當摘要圖片
                 intro_image = intro_value
@@ -249,15 +289,20 @@ for unid, entry in pending:
         fail_count += 1
         continue
 
-    # ── 2. 讀取文字並轉 HTML ─────────────────────────
-    txt_path  = os.path.join(folder, "content.txt")
-    html_body = ""
-    if os.path.exists(txt_path):
+    # ── 2. 組內文 HTML ───────────────────────────────
+    # 有 layout.json（新版 query_news.py 產生）就照 Notes 原本順序放圖片與圖說；
+    # 舊的下載沒有 layout.json，才退回「純文字 + 圖片放文末」
+    layout_path = os.path.join(folder, "layout.json")
+    txt_path    = os.path.join(folder, "content.txt")
+    html_body   = ""
+    if os.path.exists(layout_path):
+        with open(layout_path, "r", encoding="utf-8") as f:
+            html_body = layout_to_html(json.load(f), title, img_tags)
+    elif os.path.exists(txt_path):
         with open(txt_path, "r", encoding="utf-8") as f:
             html_body = text_to_html(f.read())
 
-    # 圖片附加在文章末尾
-    if img_urls:
+    if img_urls and not os.path.exists(layout_path):
         html_body += '\n<div class="news-images" style="margin-top:1.5em;">\n'
         for url in img_urls:
             html_body += f'  <img src="{url}" alt="" style="max-width:100%;margin:4px 0;">\n'

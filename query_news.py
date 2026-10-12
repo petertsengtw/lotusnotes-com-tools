@@ -5,8 +5,8 @@
 import win32com.client
 from datetime import datetime
 from dotenv import load_dotenv
-import os, re, base64, json
-from xml.etree import ElementTree as ET
+import os, re, json
+import news_dxl
 
 load_dotenv()
 
@@ -140,18 +140,11 @@ for i, (dt, doc, subject) in enumerate(sorted(records, key=lambda x: x[0]), 1):
             f.write(f"{subject}\n{'='*60}\n\n{text}")
         print(f"  文字: {len(text)} 字 → content.txt")
 
-    # ── 圖片（DXL 匯出）──────────────────────────────
+    # ── 圖片 + 段落順序（DXL 匯出）─────────────────────
+    # 圖片依文件中出現順序編號，layout.json 記錄圖片與段落的先後，上傳時把圖片放回原位
     img_count = 0
     try:
-        dxl  = exporter.Export(doc)
-        root = ET.fromstring(dxl)
-        for tag, ext in [("jpeg", ".jpg"), ("gif", ".gif"), ("png", ".png")]:
-            for node in root.iter(f"{{http://www.lotus.com/dxl}}{tag}"):
-                if node.text:
-                    img_path = os.path.join(doc_dir, f"img_{img_count:03d}{ext}")
-                    with open(img_path, "wb") as f:
-                        f.write(base64.b64decode(node.text.strip()))
-                    img_count += 1
+        img_count = news_dxl.extract_body(exporter.Export(doc), doc_dir)
         if img_count > 0:
             print(f"  圖片: {img_count} 張 → {doc_dir}")
         else:

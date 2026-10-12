@@ -35,7 +35,7 @@
 | 資料來源 | Notes 伺服器 `mdaapa/medicine/Tzuchi`，資料庫 `OAuse\mddpdoc.nsf`，View「新聞稿」 |
 | 篩選條件 | 文件 `fd_Date` 欄位落在使用者輸入的起訖日期區間內（含當天，結束日補到 23:59:59） |
 | 輸出位置 | `OUTPUT_DIR`＝專案根目錄下的 `output/`（依腳本所在位置推算，已排除於 git 之外） |
-| 輸出結構 | 每篇一個資料夾 `YYYYMMDD_標題前50字`，內含 `content.txt`（標題+分隔線+內文）與 `img_000.jpg`…（依 DXL 匯出解出的內嵌圖片，支援 jpeg/gif/png） |
+| 輸出結構 | 每篇一個資料夾 `YYYYMMDD_標題前50字`，內含 `content.txt`（標題+分隔線+內文）、`img_000.jpg`…（DXL 內嵌圖片，支援 jpeg/gif/png，依文件中出現順序編號）與 `layout.json`（`news_dxl.py` 依 DXL 順序記錄每個段落的文字與圖片，供上傳時把圖片放回原位；`content.txt` 的 `body.Text` 會在句中硬斷行，`layout.json` 的段落是完整的） |
 | 去重機制 | 雙重比對：① UNID 是否已存在 `checklist.json` ② 對應資料夾是否已存在 `content.txt`，符合任一項即跳過（第②項會補登 checklist，避免資料夾在但清單漏記） |
 | Checklist 欄位 | `date`／`subject`／`folder`／`chars`／`images`／`downloaded_at`（此階段還沒有 `joomla_id`） |
 
@@ -50,7 +50,7 @@
 | 連線前置檢查 | 執行一開始先 GET 一篇文章測試 `JOOMLA_URL` / `JOOMLA_TOKEN` 是否有效，失敗直接中止（不會半途污染資料） |
 | 驗證方式 | Token 用 `X-Joomla-Token` 標頭送出，不用 `Authorization: Bearer`（網站 Apache 會把 `Authorization` 標頭吃掉，Joomla 收不到就回 401） |
 | 圖片上傳 | Base64 編碼後 POST `/api/index.php/v1/media/files`，路徑規則 `{JOOMLA_MEDIA_FOLDER}/{年}/{月}/{月日}/{UNID前8碼}/img_NNN.ext`；送出時轉成 `local-images:/...`（`local-images` 根目錄即 `images/`，直接送 `images/...` 會存成 `images/images/...`，2026-10-12 實測後修正） |
-| 內文轉換 | 讀 `content.txt`，跳過前 3 行（標題/分隔線/空行），先 `html.escape()` 再依空行分段包成 `<p>`，圖片網址附加於文末 |
+| 內文轉換 | 有 `layout.json` 時（`layout_to_html()`）：圖片照 Notes 原位放、同一段的圖片放同一個 `<p>`（`<img src="images/..." width height>` 相對路徑），緊接在圖片後的圖說合併成一個 `<p>`、行間 `<br />`；空行分段、去段首全形空白、`html.escape()`；略過標題、「紀錄:」、「撰文者：」、「報導：」行——以上都比照人工上稿的排版。沒有 `layout.json` 的舊下載才退回讀 `content.txt`、圖片附加於文末 |
 | 建立文章 | POST `/api/index.php/v1/content/articles`，固定 `state=0`（草稿）、`catid` 取自 `.env` 的 `JOOMLA_CATEGORY_ID`、`publish_up` 設為新聞稿日期當天 08:00（格式必須是 `Y-m-d H:i:s`，用 ISO 的 `T` 分隔會讓 Joomla 寫 DB 時回 500，2026-10-12 實測） |
 | 摘要圖片 | 第一張圖設為文章的「摘要圖片」（`images.image_intro`），格式比照人工上稿：`完整網址#joomlaImage://local-images/路徑?width=寬&height=高`（寬高取自 Media API 上傳回應）；全文圖片留空。沒有圖片的文章不設 |
 | 完成標記 | 成功後把 `joomla_id`、`joomla_uploaded_at` 寫回 `checklist.json`，避免下次重複上傳 |
