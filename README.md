@@ -213,8 +213,9 @@ venv32\Scripts\python.exe query_news.py
 output/
 ├── checklist.json              ← 下載紀錄（防重複下載）
 ├── 20260506_新聞標題/
-│   ├── content.txt             ← 文字內容
-│   ├── img_000.jpg
+│   ├── content.txt             ← 文字內容（純文字，body.Text 會在句中硬斷行，僅供人看）
+│   ├── layout.json             ← 段落與圖片在 Notes 中的先後順序（news_dxl.py 產生，上傳排版用）
+│   ├── img_000.jpg             ← 依文件中出現的順序編號
 │   └── img_001.jpg
 └── 20260513_另一篇新聞/
     └── ...
@@ -239,6 +240,9 @@ venv32\Scripts\python.exe upload_joomla.py --dry-run  # 只查重、列出會做
 - **查重**：上傳前先用標題查官網，已經有的（例如已人工上稿）只把官網文章 ID 記進 `checklist.json`（`joomla_existing: true`），不重複上傳；標題會先去掉 Notes 的日期編號 `17/` 與作者括號 `(曾定嘉)`
 - **不上傳的文章**：在 `output/checklist.json` 該篇加上 `"joomla_skip": "原因"`（例如人醫心傳雜誌內容）
 - 任一張圖片上傳失敗就不建立該篇文章，下次重跑整篇重來
+- **排版**（比照人工上稿）：依 `layout.json` 把圖片放回 Notes 原本的位置、同一排的圖片放同一段，圖說接在圖片下方（多行用 `<br />` 合併）；段落完整不會句中斷行、去掉段首全形空白；不放標題、「紀錄:」、「撰文者」「報導」行。沒有 `layout.json` 的舊下載才退回「純文字 + 圖片放文末」
+- **摘要圖片**：第一張圖自動設為文章的摘要圖片（「圖片與連結」分頁），全文圖片留空
+- **要重新上傳已建立的草稿**：API 不能修改或刪除文章（伺服器只放行建立），請到後台把草稿移到垃圾桶並清空，再把 `checklist.json` 該篇的 `joomla_id`、`joomla_uploaded_at` 刪掉後重跑
 
 **前置條件（Joomla 後台）：**（中文語言包會把外掛名稱翻成「網路服務 - …」，用類型篩選比較好找；Joomla 4/5 核心**沒有** `System - Web Services` 這個外掛）
 1. 外掛類型 `api-authentication`：啟用「API 認證 - Joomla Token」（`token`）
@@ -249,7 +253,7 @@ venv32\Scripts\python.exe upload_joomla.py --dry-run  # 只查重、列出會做
 **前置條件（網站伺服器 Apache）：**
 - `/etc/apache2/conf-available/security.conf` 的「1. 封鎖 Joomla API（CVE-2023-23752）」預設擋掉所有 `/api/.../v1/` 請求；目前只開放執行上傳的電腦 `10.16.92.34`，而且只能用 `content/articles`、`media/files` 兩支 API（2026/10/12 加入）。換電腦或 IP 變動時要改這裡的 `Require ip`
 - Token 必須用 `X-Joomla-Token` 標頭送：Apache 會把 `Authorization: Bearer` 標頭吃掉，Joomla 收不到就回 401
-- ModSecurity（OWASP CRS）會把文章 HTML／圖片 base64 誤判成 XSS/RCE 而回 403，需對同一台電腦＋同兩支 API 設例外
+- ModSecurity（OWASP CRS）會把文章 HTML／圖片 base64 誤判成 XSS/RCE 而回 403，已在 `/etc/modsecurity/joomla-waf-rules.conf` 對同一台電腦＋同兩支 API 設例外（rule id 1000100，只放行建立文章 `content/articles` 與上傳圖片 `media/files`，不含修改單篇文章）。注意 `crs-exclusions.conf`、`crs-whitelist.conf` 沒被 `security2.conf` 載入，加在那裡無效。換電腦或 IP 時這裡也要一起改
 - 伺服器擋 `DELETE` 方法（API 刪不了檔案），測試檔要上伺服器手動刪
 
 **圖片上傳路徑規則：**（Media API 實際送出的是 `local-images:/01news/...`，`local-images` 的根目錄就是 `images/`，直接送 `images/...` 會被存成 `images/images/...`）
@@ -449,6 +453,7 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 | `menu.py` | 工具腳本選單：`python menu.py` 顯示所有常用工具與簡述，輸入編號即執行（自動用 `venv32` 直譯器；新增工具只要在檔案內的 `MENU` 加一筆） |
 | `check_notes.py` | 列出 hmsign.nsf 所有 View（維護用） |
 | `inspect_news.py` | 列出 mddpdoc.nsf 的 View、Form 及第一筆欄位（維護用） |
+| `news_dxl.py` | 共用模組：依 DXL 順序解析新聞稿 Body，存圖片並產生 `layout.json`（`query_news.py` 用） |
 | `query_checkin.py` | 查詢指定日期區間的打卡紀錄 |
 | `store/inspect_store.py` | 列出 ContributingStore.nsf（特約商店）的 View、Form 及各 View 第一筆欄位（維護用） |
 | `store/notes_store.py` | 共用模組：讀取未作廢、未過期的特約商店清單 |
@@ -482,7 +487,7 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
   - 圖片路徑少了 `local-images:` 前綴，會存到 `images/images/...` → 已修正
 - [x] 上傳前查重（2026/10/12：09/17、09/18、09/21、09/23 四篇已人工上稿，查重後只記 ID；人醫心傳兩篇標 `joomla_skip`）
 - [x] 網站伺服器設 ModSecurity 例外（`/etc/modsecurity/joomla-waf-rules.conf`，rule id 1000100）
-- [x] 完整測試上傳流程（2026/10/12：建立草稿 4706～4709，分類 8，圖片正常）
+- [x] 完整測試上傳流程（2026/10/12：建立草稿 4714～4717，分類 8，圖片位置、圖說、摘要圖片正常）
 - [ ] 至 Joomla 後台確認草稿文章內容與圖片顯示正確
 - [ ] 審核草稿後手動發佈，確認前台顯示正常
 
