@@ -41,7 +41,7 @@ MENU = [
          "script": "store/apply_review.py", "args": ["--status", "merchant_signed"]},
         {"title": "瀏覽已核准申請", "desc": "純列出已核准、等待套版的申請，不會有任何變更",
          "script": "store/apply_review.py", "args": ["--status", "approved"]},
-        {"title": "查詢申請編號與查詢碼", "desc": "店家忘了時，用店名/統編/電話搜尋，顯示申請編號與查詢碼",
+        {"title": "查詢申請資料", "desc": "用店名/統編/電話搜尋，顯示店家填的完整表單、處理進度、申請編號與查詢碼",
          "script": "store/apply_review.py", "prompts": [("關鍵字（店名、統編、電話、負責人皆可）", "--find")]},
         {"title": "結案（放棄）指定申請", "desc": "把指定申請標記為 abandoned，不予受理",
          "script": "store/apply_review.py", "prompts": [("申請編號（例如 20260909-03）", "--abandon")],

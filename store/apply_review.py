@@ -8,7 +8,8 @@
     python apply_review.py --find 統編或店名或電話      # 店家忘了申請編號/查詢碼時，搜尋並顯示
 
 `--find` 會在所有狀態的申請裡搜尋（店名、負責人、聯絡人、統編、電話、Email、申請
-編號，部分符合即可，電話可帶或不帶橫線），列出符合的申請、狀態、以及**查詢碼**。
+編號，部分符合即可，電話可帶或不帶橫線），列出符合申請的完整表單內容、狀態、合約期間、
+處理進度（台灣時間）以及**查詢碼**。
 查詢碼是店家下載合約的唯一憑證，告訴對方之前請先核對身分（例如對方能說出統編、
 留的電話跟申請資料相符）。
 
@@ -33,7 +34,7 @@ merchant_signed，不需要在這裡手動標記——這裡負責的是「人�
 import argparse
 import os
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import requests
 import urllib3
@@ -190,6 +191,23 @@ def matches_keyword(app: dict, keyword: str) -> bool:
     return False
 
 
+PROGRESS_FIELDS = (
+    ("submittedAt", "送出"),
+    ("reviewedAt", "審核"),
+    ("contractGeneratedAt", "產生合約"),
+    ("merchantSignedAt", "店家回傳用印"),
+    ("completedAt", "結案"),
+)
+
+
+def to_taipei(timestamp: str) -> str:
+    """後端回傳的是 UTC 時間字串（例如 2026-10-05 02:13:28.988000+00:00），轉成台灣時間顯示到分。"""
+    try:
+        return (datetime.fromisoformat(timestamp) + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return str(timestamp)
+
+
 def find_applications(keyword: str):
     matched = [a for a in fetch_applications(None) if matches_keyword(a, keyword)]
     if not matched:
@@ -198,10 +216,18 @@ def find_applications(keyword: str):
 
     print(f"共找到 {len(matched)} 筆符合「{keyword}」的申請（查詢碼是下載合約的憑證，告知前請先核對對方身分）")
     for app in matched:
-        print("-" * 50)
-        print(f"申請編號：{app['applicationId']}　查詢碼：{app.get('queryCode', '（無）')}　狀態：{app['status']}")
-        print(f"店名：{app['storeName']}　負責人：{app['ownerName']}　統編：{app['taxId']}")
-        print(f"電話：{app['phone']}　Email：{app['email']}")
+        print_application(app)
+        print(f"查詢碼：{app.get('queryCode', '（無）')}")
+        if app.get("contractStartDate"):
+            print(f"合約期間：{app['contractStartDate']} ～ {app.get('contractEndDate', '')}")
+        if app.get("reviewNote"):
+            print(f"審核備註：{app['reviewNote']}")
+        print("處理進度：" + "　".join(f"{label} {to_taipei(app.get(key))}"
+                                     for key, label in PROGRESS_FIELDS if app.get(key)))
+        if app.get("contractUrl"):
+            print(f"合約檔：{app['contractUrl']}")
+        if app.get("finalDocUrl"):
+            print(f"最終檔案：{app['finalDocUrl']}")
 
 
 def review_pending(app: dict):
