@@ -82,7 +82,7 @@ def find_existing_article(title):
 def upload_image(local_path, media_path):
     """上傳圖片到 Joomla 媒體庫
     media_path: 相對於 Joomla 根目錄，例如 images/01news/2026/05/0513/img_000.jpg
-    回傳完整圖片 URL
+    回傳 (完整圖片 URL, 摘要圖片欄位值)
     """
     # Media API 的 path 要寫成「adapter:/路徑」，local-images 的根目錄已經是 images/，
     # 直接送 images/... 會被存成 images/images/...（2026-10-12 實測）
@@ -99,11 +99,22 @@ def upload_image(local_path, media_path):
     }
     r = requests.post(f"{API_BASE}/media/files", headers=HEADERS, json=payload, timeout=30, verify=False)
     r.raise_for_status()
-    return f"{JOOMLA_URL}/{media_path}"
+    url = f"{JOOMLA_URL}/{media_path}"
+    return url, intro_image_value(url, adapter_path, r.json()["data"]["attributes"])
 
 
-def create_article(title, html_body, pub_date_str):
-    """在 Joomla 建立草稿文章，回傳文章 ID"""
+def intro_image_value(url, adapter_path, attrs):
+    """組出文章「摘要圖片」欄位值，格式比照後台人工上稿：
+    完整網址#joomlaImage://local-images/路徑?width=寬&height=高"""
+    value = f"{url}#joomlaImage://{adapter_path.replace(':/', '/', 1)}"
+    if attrs.get("width") and attrs.get("height"):
+        value += f"?width={attrs['width']}&height={attrs['height']}"
+    return value
+
+
+def create_article(title, html_body, pub_date_str, intro_image=""):
+    """在 Joomla 建立草稿文章，回傳文章 ID
+    intro_image: 摘要圖片欄位值（第一張圖），沒有圖片就留空"""
     try:
         pub_dt = datetime.strptime(pub_date_str, "%Y/%m/%d")
         pub_up = pub_dt.strftime("%Y-%m-%d 08:00:00")
@@ -117,6 +128,11 @@ def create_article(title, html_body, pub_date_str):
         "state":       0,          # 草稿，手動審核後再發佈
         "language":    "*",
         "publish_up":  pub_up,
+        # 只設摘要圖片，全文圖片留空，比照人工上稿
+        "images": {
+            "image_intro": intro_image, "image_intro_alt": "", "float_intro": "", "image_intro_caption": "",
+            "image_fulltext": "", "image_fulltext_alt": "", "float_fulltext": "", "image_fulltext_caption": "",
+        },
     }
     r = requests.post(f"{API_BASE}/content/articles", headers=HEADERS, json=payload, timeout=30, verify=False)
     r.raise_for_status()
@@ -209,7 +225,8 @@ for unid, entry in pending:
     unid_short      = unid[:8].upper()
     img_subdir      = f"{MEDIA_FOLDER}/{year}/{mon}/{mon}{day}/{unid_short}"
 
-    img_urls  = []
+    img_urls    = []
+    intro_image = ""
     img_files = sorted(
         f for f in os.listdir(folder)
         if re.match(r'img_\d+\.(jpg|gif|png)$', f, re.IGNORECASE)
@@ -218,8 +235,10 @@ for unid, entry in pending:
         media_path = f"{img_subdir}/{img_file}"   # e.g. images/01news/2026/05/0513/img_000.jpg
         local_path = os.path.join(folder, img_file)
         try:
-            url = upload_image(local_path, media_path)
+            url, intro_value = upload_image(local_path, media_path)
             img_urls.append(url)
+            if not intro_image:            # 第一張圖當摘要圖片
+                intro_image = intro_value
             print(f"  圖片: {media_path} → 上傳成功")
         except Exception as ex:
             print(f"  圖片: {img_file} → 上傳失敗: {ex}")
@@ -246,7 +265,7 @@ for unid, entry in pending:
 
     # ── 3. 建立草稿文章 ──────────────────────────────
     try:
-        article_id = create_article(title, html_body, entry["date"])
+        article_id = create_article(title, html_body, entry["date"], intro_image)
         print(f"  文章建立成功  Joomla ID={article_id}  （草稿）")
         checklist[unid]["joomla_id"]          = article_id
         checklist[unid]["joomla_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

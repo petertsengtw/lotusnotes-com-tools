@@ -52,6 +52,7 @@
 | 圖片上傳 | Base64 編碼後 POST `/api/index.php/v1/media/files`，路徑規則 `{JOOMLA_MEDIA_FOLDER}/{年}/{月}/{月日}/{UNID前8碼}/img_NNN.ext`；送出時轉成 `local-images:/...`（`local-images` 根目錄即 `images/`，直接送 `images/...` 會存成 `images/images/...`，2026-10-12 實測後修正） |
 | 內文轉換 | 讀 `content.txt`，跳過前 3 行（標題/分隔線/空行），先 `html.escape()` 再依空行分段包成 `<p>`，圖片網址附加於文末 |
 | 建立文章 | POST `/api/index.php/v1/content/articles`，固定 `state=0`（草稿）、`catid` 取自 `.env` 的 `JOOMLA_CATEGORY_ID`、`publish_up` 設為新聞稿日期當天 08:00（格式必須是 `Y-m-d H:i:s`，用 ISO 的 `T` 分隔會讓 Joomla 寫 DB 時回 500，2026-10-12 實測） |
+| 摘要圖片 | 第一張圖設為文章的「摘要圖片」（`images.image_intro`），格式比照人工上稿：`完整網址#joomlaImage://local-images/路徑?width=寬&height=高`（寬高取自 Media API 上傳回應）；全文圖片留空。沒有圖片的文章不設 |
 | 完成標記 | 成功後把 `joomla_id`、`joomla_uploaded_at` 寫回 `checklist.json`，避免下次重複上傳 |
 | 失敗處理 | 任一張圖片上傳失敗、或建立文章失敗，都不寫入 `joomla_id`，下次執行整篇重試（圖片以 `override` 覆蓋，不會重複） |
 
