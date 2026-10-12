@@ -4,7 +4,7 @@
 
 - **功能一・打卡**：執行簽到/簽退，過程中順便完成院內 Portal 上網認證，並用 LINE 推播打卡結果通知。
 - **功能二・新聞稿擷取**：從 Notes 資料庫擷取新聞稿內容與圖片，存到本機
-- **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章
+- **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章（圖片放回原位、圖說在下、自動設摘要圖片）；上傳前查重，標題相似的列為待確認。**每週一 07:00 排程自動跑**，有新草稿或待確認時用 LINE 通知
 - **功能四・特約商店查詢頁**：從 Notes 資料庫匯出特約商店優惠清單，部署成一個**限本院同仁使用**的查詢頁；同仁透過 LINE 官方帳號（LINE@）加好友、在 LIFF 頁完成身分綁定驗證後即可查詢，後端為 Firebase Cloud Functions + Firestore
 - **功能五・福利公告查詢**：從院內公佈欄匯出職工福利行政小組發布的公告（含圖片），部署成另一個限本院同仁使用的查詢頁，跟功能四共用同一套 LINE 身分驗證，但公告資料存在 Ubuntu 網站伺服器，不進 Firebase
 - **功能六・特約商店線上申請**：店家線上填表申請加入特約（可選用本院合約範本或直接上傳自有合約書），職工福利小組審核後續接手產生/核准合約，店家蓋章後可直接在網頁上傳或透過 LINE 官方帳號回傳掃描檔，取代原本純電話/Email 聯繫的方式，詳見 `sdd5.md`
@@ -37,15 +37,30 @@ flowchart TD
     K --> L[LINE Messaging API]
     L --> M([LINE 推播通知])
 
-    %% 新聞稿流程
-    N([手動執行]) --> O[query_news.py]
+    %% 新聞稿流程（每週一 07:00 排程，也可手動執行各步驟）
+    A --> NB[task_news_daily.bat\n每週一 07:00]
+    NB --> ND[news_daily.py]
+    N([手動執行]) --> O
+    ND --> O[query_news.py --days 14]
     O --> P[Lotus Notes COM API]
     P --> Q[(mddpdoc.nsf\n新聞稿資料庫)]
-    Q --> R[下載文章與圖片\noutput/]
+    Q --> R[news_dxl.py 解析 DXL\noutput/ 文字、圖片、layout.json]
 
+    ND --> S
     R --> S[upload_joomla.py]
     S --> T[Joomla 4 REST API]
-    T --> U([官網草稿文章])
+    T --> SD{官網已有?}
+    SD -- 同標題 --> SE[只記文章 ID\n不重複上傳]
+    SD -- 標題相似 --> SF[待確認\n不上傳]
+    SF --> SG([人工判斷\nupload_joomla.py --resolve])
+    SG -. new .-> S
+    SD -- 沒有 --> SH[上傳圖片\n圖片放回原位、圖說在下\n第一張設摘要圖片]
+    SH --> U([官網草稿文章])
+    U --> UV([後台人工審核發佈])
+    S --> SJ[output/last_upload.json]
+    SJ --> SK{新草稿／待確認\n／失敗？}
+    SK -- 有 --> L
+    SK -- 沒有 --> SL([不通知\n只寫 news_daily.log])
 
     %% 特約商店說明頁部署（join.html/qa.html/style.css 等靜態頁，平常不執行）
     V([手動執行\n平常不要跑]) --> W[deploy_store.py]
