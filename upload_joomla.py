@@ -1,11 +1,13 @@
 """
 Joomla 新聞稿上傳工具
-用法: python upload_joomla.py
-- 從 checklist.json 找出尚未上傳的文章
-- 圖片上傳至 Joomla 媒體庫
+用法: python upload_joomla.py [--dry-run]
+- 從 checklist.json 找出尚未上傳的文章（略過標了 joomla_skip 的）
+- 先用標題查官網，已經有的（例如人工上稿過）只記下文章 ID，不重複上傳
+- 圖片上傳至 Joomla 媒體庫，任一張失敗就不建立文章，下次重跑
 - 建立草稿文章（需至後台審核後手動發佈）
+--dry-run：只查重、列出會做什麼，不上傳也不改 checklist
 """
-import os, json, base64, re, urllib3
+import os, sys, json, base64, re, html, urllib3
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
@@ -23,7 +25,8 @@ CHECKLIST    = os.path.join(OUTPUT_DIR, "checklist.json")
 
 API_BASE = f"{JOOMLA_URL}/api/index.php/v1"
 HEADERS  = {
-    "Authorization": f"Bearer {JOOMLA_TOKEN}",
+    # 不用 Authorization: Bearer，Apache 常把這個標頭擋掉導致 401；X-Joomla-Token 同樣被 Joomla Token 外掛接受
+    "X-Joomla-Token": JOOMLA_TOKEN,
     "Content-Type":  "application/json",
     "Accept":        "application/vnd.api+json",
 }
@@ -48,9 +51,32 @@ def text_to_html(content_txt):
     body_text = "\n".join(lines[3:]).strip() if len(lines) > 3 else content_txt
     paragraphs = re.split(r'\n{2,}', body_text)
     return "\n".join(
-        f"<p>{p.strip().replace(chr(10), '<br>')}</p>"
+        f"<p>{html.escape(p.strip(), quote=False).replace(chr(10), '<br>')}</p>"
         for p in paragraphs if p.strip()
     )
+
+
+def clean_title(subject):
+    """Notes 標題 → 官網標題：去掉開頭的日期編號「17/」與結尾的作者「(曾定嘉)」，比照人工上稿的寫法"""
+    title = re.sub(r'^\d+/', '', subject.strip())
+    title = re.sub(r'\s*[(（][^()（）]*[)）]$', '', title)
+    return title.strip()
+
+
+def find_existing_article(title):
+    """用標題查官網是否已有這篇（含已發佈、未發佈），有的話回傳文章 ID，否則回傳 None
+    比對時忽略所有空白（含全形空白），避免人工上稿時空白數不同而漏判"""
+    def norm(s):
+        return re.sub(r'\s+', '', s)
+    # Joomla 的 filter[search] 是 LIKE 比對，空白寫法不同會搜不到，所以取標題中最長的一段來搜
+    keyword = max(re.split(r'\s+', title), key=len)
+    r = requests.get(f"{API_BASE}/content/articles", headers=HEADERS, timeout=30, verify=False,
+                     params={"filter[search]": keyword, "page[limit]": 20})
+    r.raise_for_status()
+    for item in r.json().get("data", []):
+        if norm(item["attributes"]["title"]) == norm(title):
+            return int(item["id"])
+    return None
 
 
 def upload_image(local_path, media_path):
@@ -58,10 +84,16 @@ def upload_image(local_path, media_path):
     media_path: 相對於 Joomla 根目錄，例如 images/01news/2026/05/0513/img_000.jpg
     回傳完整圖片 URL
     """
+    # Media API 的 path 要寫成「adapter:/路徑」，local-images 的根目錄已經是 images/，
+    # 直接送 images/... 會被存成 images/images/...（2026-10-12 實測）
+    if not media_path.startswith("images/"):
+        raise ValueError(f"JOOMLA_MEDIA_FOLDER 必須在 images/ 底下: {media_path}")
+    adapter_path = "local-images:/" + media_path[len("images/"):]
+
     with open(local_path, "rb") as f:
         encoded = base64.b64encode(f.read()).decode()
     payload = {
-        "path":     media_path,
+        "path":     adapter_path,
         "content":  encoded,
         "override": True,
     }
@@ -74,9 +106,9 @@ def create_article(title, html_body, pub_date_str):
     """在 Joomla 建立草稿文章，回傳文章 ID"""
     try:
         pub_dt = datetime.strptime(pub_date_str, "%Y/%m/%d")
-        pub_up = pub_dt.strftime("%Y-%m-%dT08:00:00")
+        pub_up = pub_dt.strftime("%Y-%m-%d 08:00:00")
     except Exception:
-        pub_up = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        pub_up = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     payload = {
         "title":       title,
@@ -118,28 +150,56 @@ if not checklist:
     print("checklist.json 不存在或為空，請先執行 query_news.py 下載文章。")
     exit()
 
-pending = [(unid, e) for unid, e in checklist.items() if "joomla_id" not in e]
+DRY_RUN = "--dry-run" in sys.argv
+
+pending = [(unid, e) for unid, e in checklist.items()
+           if "joomla_id" not in e and "joomla_skip" not in e]
+skipped = sum(1 for e in checklist.values() if "joomla_skip" in e)
 
 print(f"Checklist 共 {len(checklist)} 篇")
-print(f"已上傳: {len(checklist) - len(pending)} 篇  /  待上傳: {len(pending)} 篇")
+print(f"已上傳/官網已有: {len(checklist) - len(pending) - skipped} 篇  /  不上傳: {skipped} 篇  /  待上傳: {len(pending)} 篇")
+if DRY_RUN:
+    print("【--dry-run】只查重、不上傳、不改 checklist")
 print("=" * 60)
 
 if not pending:
     print("沒有待上傳的文章。")
     exit()
 
-success_count = 0
-fail_count    = 0
+success_count  = 0
+existing_count = 0
+fail_count     = 0
 
 for unid, entry in pending:
     subject = entry["subject"]
+    title   = clean_title(subject)
     folder  = os.path.join(OUTPUT_DIR, entry["folder"])
     print(f"\n{'─'*60}")
-    print(f"上傳：{entry['date']}  {subject}")
+    print(f"上傳：{entry['date']}  {title}")
 
     if not os.path.isdir(folder):
         print(f"  [錯誤] 找不到資料夾: {folder}，略過")
         fail_count += 1
+        continue
+
+    # ── 0. 查重：官網已有同標題文章（例如已人工上稿）就只記下 ID ──
+    try:
+        existing_id = find_existing_article(title)
+    except Exception as ex:
+        print(f"  [錯誤] 查重失敗，為避免重複建立文章先略過: {ex}")
+        fail_count += 1
+        continue
+    if existing_id:
+        print(f"  官網已有此文章  Joomla ID={existing_id}，不重複上傳")
+        existing_count += 1
+        if not DRY_RUN:
+            checklist[unid]["joomla_id"]          = existing_id
+            checklist[unid]["joomla_existing"]    = True
+            checklist[unid]["joomla_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_checklist(checklist)
+        continue
+    if DRY_RUN:
+        print("  官網沒有此文章 → 會上傳圖片並建立草稿")
         continue
 
     # ── 1. 上傳圖片 ──────────────────────────────────
@@ -164,6 +224,12 @@ for unid, entry in pending:
         except Exception as ex:
             print(f"  圖片: {img_file} → 上傳失敗: {ex}")
 
+    # 有任何一張圖失敗就不建立文章，下次重跑時整篇重來（圖片以 override 覆蓋，不會重複）
+    if len(img_urls) < len(img_files):
+        print(f"  {len(img_files) - len(img_urls)} 張圖片上傳失敗，本篇先不建立文章，下次重跑")
+        fail_count += 1
+        continue
+
     # ── 2. 讀取文字並轉 HTML ─────────────────────────
     txt_path  = os.path.join(folder, "content.txt")
     html_body = ""
@@ -180,7 +246,7 @@ for unid, entry in pending:
 
     # ── 3. 建立草稿文章 ──────────────────────────────
     try:
-        article_id = create_article(subject, html_body, entry["date"])
+        article_id = create_article(title, html_body, entry["date"])
         print(f"  文章建立成功  Joomla ID={article_id}  （草稿）")
         checklist[unid]["joomla_id"]          = article_id
         checklist[unid]["joomla_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -193,6 +259,6 @@ for unid, entry in pending:
         fail_count += 1
 
 print("\n" + "=" * 60)
-print(f"完成！成功 {success_count} 篇，失敗 {fail_count} 篇")
+print(f"完成！成功 {success_count} 篇，官網已有 {existing_count} 篇，失敗 {fail_count} 篇")
 if success_count > 0:
     print(f"請至 Joomla 後台 → 文章管理 → 審核草稿後發佈")

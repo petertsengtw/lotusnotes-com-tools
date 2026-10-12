@@ -67,7 +67,9 @@ while e:
             dt = datetime(fd[0].year, fd[0].month, fd[0].day)
             if date_from <= dt <= date_to:
                 subject = doc.GetItemValue("Subject")
-                records.append((dt, doc, subject[0] if subject else "(無標題)"))
+                # 標題可能夾帶換行（實例：2026/09/24 伊波拉防疫演習結尾有 \r\n），會讓資料夾名稱不合法
+                subject = re.sub(r'\s*[\r\n]+\s*', ' ', subject[0]).strip() if subject else ""
+                records.append((dt, doc, subject or "(無標題)"))
     e = entries.GetNextEntry(e)
 
 total      = len(records)

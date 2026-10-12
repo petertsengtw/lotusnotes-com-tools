@@ -232,17 +232,27 @@ output/
 將 `query_news.py` 下載的新聞稿上傳至 Joomla 4 網站，建立草稿文章。
 
 ```powershell
-venv32\Scripts\python.exe upload_joomla.py
+venv32\Scripts\python.exe upload_joomla.py            # 正式上傳
+venv32\Scripts\python.exe upload_joomla.py --dry-run  # 只查重、列出會做什麼，不上傳
 ```
 
-**前置條件（Joomla 後台）：**
-1. Extensions → Plugins → 啟用 `API Authentication - Web Services Joomla Token`
-2. Extensions → Plugins → 啟用 `Web Services - Content`
-3. Extensions → Plugins → 啟用 `Web Services - Media`
-4. Extensions → Plugins → 啟用 `System - Web Services`
-5. Users → 你的帳號 → Joomla API Token → 產生 Token 並填入 `.env`
+- **查重**：上傳前先用標題查官網，已經有的（例如已人工上稿）只把官網文章 ID 記進 `checklist.json`（`joomla_existing: true`），不重複上傳；標題會先去掉 Notes 的日期編號 `17/` 與作者括號 `(曾定嘉)`
+- **不上傳的文章**：在 `output/checklist.json` 該篇加上 `"joomla_skip": "原因"`（例如人醫心傳雜誌內容）
+- 任一張圖片上傳失敗就不建立該篇文章，下次重跑整篇重來
 
-**圖片上傳路徑規則：**
+**前置條件（Joomla 後台）：**（中文語言包會把外掛名稱翻成「網路服務 - …」，用類型篩選比較好找；Joomla 4/5 核心**沒有** `System - Web Services` 這個外掛）
+1. 外掛類型 `api-authentication`：啟用「API 認證 - Joomla Token」（`token`）
+2. 外掛類型 `user`：啟用「會員 - Joomla API Token」（`token`），Token 所屬帳號須在允許群組內（預設 Super Users）
+3. 外掛類型 `webservices`：啟用「網路服務 - 內容」（`content`）與「網路服務 - 媒體」（`media`）
+4. Users → 你的帳號 → Joomla API Token → 產生 Token 並填入 `.env`
+
+**前置條件（網站伺服器 Apache）：**
+- `/etc/apache2/conf-available/security.conf` 的「1. 封鎖 Joomla API（CVE-2023-23752）」預設擋掉所有 `/api/.../v1/` 請求；目前只開放執行上傳的電腦 `10.16.92.34`，而且只能用 `content/articles`、`media/files` 兩支 API（2026/10/12 加入）。換電腦或 IP 變動時要改這裡的 `Require ip`
+- Token 必須用 `X-Joomla-Token` 標頭送：Apache 會把 `Authorization: Bearer` 標頭吃掉，Joomla 收不到就回 401
+- ModSecurity（OWASP CRS）會把文章 HTML／圖片 base64 誤判成 XSS/RCE 而回 403，需對同一台電腦＋同兩支 API 設例外
+- 伺服器擋 `DELETE` 方法（API 刪不了檔案），測試檔要上伺服器手動刪
+
+**圖片上傳路徑規則：**（Media API 實際送出的是 `local-images:/01news/...`，`local-images` 的根目錄就是 `images/`，直接送 `images/...` 會被存成 `images/images/...`）
 
 ```
 images/01news/{年}/{月}/{月日}/{UNID前8碼}/img_000.jpg
@@ -466,10 +476,13 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 
 ### Joomla 上傳功能（進行中）
 
-- [ ] **安裝 `System - Web Services` 外掛**
-  - 原因：Joomla 後台找不到此核心外掛，導致 API 路由無法啟用（回傳 401）
-  - 解法：Extensions → Manage → Discover，或透過 FTP 上傳 `plugins/system/webservices/` 後重新 Discover 安裝
-- [ ] 完整測試上傳流程（圖片 + 文章）
+- [x] ~~安裝 `System - Web Services` 外掛~~：查證後 Joomla 4/5 核心沒有這個外掛，API 外掛本來就都已啟用。真正原因（2026/10/12 排除）：
+  - Apache `security.conf` 封鎖所有 `/api/.../v1/`（403）→ 加白名單 `10.16.92.34`，只開放文章、媒體兩支 API
+  - Apache 吃掉 `Authorization` 標頭（401）→ 改用 `X-Joomla-Token` 標頭
+  - 圖片路徑少了 `local-images:` 前綴，會存到 `images/images/...` → 已修正
+- [x] 上傳前查重（2026/10/12：09/17、09/18、09/21、09/23 四篇已人工上稿，查重後只記 ID；人醫心傳兩篇標 `joomla_skip`）
+- [x] 網站伺服器設 ModSecurity 例外（`/etc/modsecurity/joomla-waf-rules.conf`，rule id 1000100）
+- [x] 完整測試上傳流程（2026/10/12：建立草稿 4706～4709，分類 8，圖片正常）
 - [ ] 至 Joomla 後台確認草稿文章內容與圖片顯示正確
 - [ ] 審核草稿後手動發佈，確認前台顯示正常
 
