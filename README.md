@@ -187,6 +187,7 @@ venv32\Scripts\python.exe auto_checkin.py out
 |---|---|
 | `task_checkin_in.bat` | 排程簽到（建議設定 08:00） |
 | `task_checkin_out.bat` | 排程簽退（建議設定 17:00） |
+| `task_news_daily.bat` | 新聞稿自動上稿（`news_daily.py --days 14`，見「功能三」）；排程名稱「新聞稿每週自動上稿」（工作排程器 autowork 資料夾），**每週一 07:00**。要排在 Notes 用戶端沒開的時段，且不要跟打卡同一時間 |
 
 設定方式：工作排程器 → 建立基本工作 → 觸發程序選「每天」→ 動作選「啟動程式」→ 選擇對應 `.bat` 檔。
 
@@ -268,6 +269,29 @@ images/01news/2026/05/0513/BCE1730B/img_000.jpg
 ```
 
 **文章狀態：** 上傳後為**草稿（Unpublished）**，需至後台審核後手動發佈。
+
+### 每日自動上稿（`news_daily.py`，排程用）
+
+```powershell
+venv32\Scripts\python.exe news_daily.py                   # 擷取最近 7 天 → 上傳 → 有結果才發 LINE
+venv32\Scripts\python.exe news_daily.py --always-notify   # 沒有新文章也發 LINE（測試通知用）
+```
+
+1. `query_news.py --days 7`：擷取最近 7 天的新聞稿（已下載的自動跳過）
+2. `upload_joomla.py`：官網沒有的建成草稿；官網已有同標題的只記 ID；**標題相似**（人工上稿時改過標題，相似度 ≥ 0.6 且建立日期在前後 30 天內）的列為**待確認**，不上傳
+3. 有新草稿、待確認、失敗或錯誤時，LINE 推播給 `.env` 的 `LINE_USER_ID`；完整過程寫在 `news_daily.log`
+
+**處理待確認**（LINE 通知裡會附指令，也可以用 `menu.py` →「處理待確認的新聞稿」）：
+```powershell
+venv32\Scripts\python.exe upload_joomla.py --resolve C9B8D5D8 new    # 不同篇：下次排程照常上傳
+venv32\Scripts\python.exe upload_joomla.py --resolve C9B8D5D8 4701   # 同一篇：記下官網文章 ID，不上傳
+```
+
+**排程注意事項：**
+- 排程用 `task_news_daily.bat`，目前設定**每週一 07:00**、擷取最近 **14 天**（每週跑一次只抓 7 天會漏掉上週一 07:00 之後才建立的稿；重疊的部分已下載會自動跳過）
+- 排程是「使用者登入時才執行」，週一 07:00 電腦沒開或沒登入就會跳過這週，下週的 14 天範圍會補抓
+- **HCL Notes 用戶端開著時會被鎖住而擷取失敗**（LINE 會通知「請關閉 HCL Notes 用戶端」），排程時間要避開有人用這台電腦的時段
+- 失敗的文章不會標記為已上傳，下次排程自動重試
 
 ---
 
@@ -454,6 +478,7 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 | `check_notes.py` | 列出 hmsign.nsf 所有 View（維護用） |
 | `inspect_news.py` | 列出 mddpdoc.nsf 的 View、Form 及第一筆欄位（維護用） |
 | `news_dxl.py` | 共用模組：依 DXL 順序解析新聞稿 Body，存圖片並產生 `layout.json`（`query_news.py` 用） |
+| `news_daily.py` | 新聞稿每日自動上稿：擷取 → 上傳 → LINE 通知，排程用（見「功能三」） |
 | `query_checkin.py` | 查詢指定日期區間的打卡紀錄 |
 | `store/inspect_store.py` | 列出 ContributingStore.nsf（特約商店）的 View、Form 及各 View 第一筆欄位（維護用） |
 | `store/notes_store.py` | 共用模組：讀取未作廢、未過期的特約商店清單 |

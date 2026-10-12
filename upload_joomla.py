@@ -1,13 +1,17 @@
 """
 Joomla 新聞稿上傳工具
 用法: python upload_joomla.py [--dry-run]
-- 從 checklist.json 找出尚未上傳的文章（略過標了 joomla_skip 的）
+      python upload_joomla.py --resolve <UNID前8碼> new|<Joomla文章ID>
+- 從 checklist.json 找出尚未上傳的文章（略過標了 joomla_skip、或待確認 joomla_review 的）
 - 先用標題查官網，已經有的（例如人工上稿過）只記下文章 ID，不重複上傳
+- 標題不同但很像官網近期文章的（人工上稿時改過標題），標成待確認 joomla_review，不上傳
 - 圖片上傳至 Joomla 媒體庫，任一張失敗就不建立文章，下次重跑
 - 建立草稿文章（需至後台審核後手動發佈）
+- 結果摘要寫到 output/last_upload.json，給 news_daily.py 發 LINE 通知
 --dry-run：只查重、列出會做什麼，不上傳也不改 checklist
+--resolve：處理待確認的文章；new＝確定是新文章，下次照常上傳；文章 ID＝跟官網那篇是同一篇，記下 ID 不上傳
 """
-import os, sys, json, base64, re, html, urllib3
+import os, sys, json, base64, re, html, difflib, argparse, urllib3
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
@@ -22,6 +26,12 @@ CATEGORY_ID  = int(os.getenv("JOOMLA_CATEGORY_ID", "8"))
 MEDIA_FOLDER = os.getenv("JOOMLA_MEDIA_FOLDER", "images/news").strip("/")
 OUTPUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 CHECKLIST    = os.path.join(OUTPUT_DIR, "checklist.json")
+SUMMARY      = os.path.join(OUTPUT_DIR, "last_upload.json")
+
+# 相似標題門檻（2026-10-12 用實際資料校正）：人工改過標題的同一篇約 0.83，
+# 無關文章多在 0.42 以下；但「○○節門診停診訊息」這類套版標題不同節日也有 0.69，所以再加日期條件
+SIMILAR_RATIO = 0.6
+SIMILAR_DAYS  = 30
 
 API_BASE = f"{JOOMLA_URL}/api/index.php/v1"
 HEADERS  = {
@@ -96,6 +106,43 @@ def clean_title(subject):
     title = re.sub(r'^\d+/', '', subject.strip())
     title = re.sub(r'\s*[(（][^()（）]*[)）]$', '', title)
     return title.strip()
+
+
+def fetch_recent_articles(limit=200):
+    """官網最新的 limit 篇文章 [(id, 標題, 建立日期 date)]，給相似標題比對用"""
+    r = requests.get(f"{API_BASE}/content/articles", headers=HEADERS, timeout=30, verify=False,
+                     params={"page[limit]": limit, "list[ordering]": "a.id", "list[direction]": "desc"})
+    r.raise_for_status()
+    result = []
+    for item in r.json().get("data", []):
+        a = item["attributes"]
+        try:
+            created = datetime.strptime(a.get("created", "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        result.append((int(item["id"]), a["title"], created))
+    return result
+
+
+def find_similar_articles(title, news_date, recent):
+    """標題相似度 ≥ SIMILAR_RATIO、且建立日期在新聞稿日期前後 SIMILAR_DAYS 天內的官網文章，依相似度排序
+    回傳 [(id, 標題, 相似度)]"""
+    def norm(s):
+        return re.sub(r'[\s\W_]+', '', s)    # 忽略空白與標點
+    d = datetime.strptime(news_date, "%Y/%m/%d").date()
+    hits = []
+    for aid, atitle, created in recent:
+        if abs((created - d).days) > SIMILAR_DAYS:
+            continue
+        ratio = difflib.SequenceMatcher(None, norm(title), norm(atitle)).ratio()
+        if ratio >= SIMILAR_RATIO:
+            hits.append((aid, atitle.strip(), round(ratio, 2)))
+    return sorted(hits, key=lambda h: -h[2])
+
+
+def write_summary(summary):
+    with open(SUMMARY, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
 
 
 def find_existing_article(title):
@@ -178,81 +225,133 @@ def create_article(title, html_body, pub_date_str, intro_image=""):
     return r.json()["data"]["id"]
 
 
+# ── 參數 ───────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="把 query_news.py 下載的新聞稿上傳成 Joomla 草稿")
+parser.add_argument("--dry-run", action="store_true", help="只查重、列出會做什麼，不上傳也不改 checklist")
+parser.add_argument("--resolve", nargs=2, metavar=("UNID前8碼", "new|文章ID"),
+                    help="處理待確認文章：new＝確定是新文章，下次照常上傳；文章ID＝跟官網那篇是同一篇")
+args    = parser.parse_args()
+DRY_RUN = args.dry_run
+NOW     = lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ── 處理待確認文章（--resolve）：只改本機 checklist，不連 Joomla ──
+if args.resolve:
+    key, target = args.resolve[0].upper(), args.resolve[1]
+    checklist   = load_checklist()
+    matches     = [u for u in checklist if u.upper().startswith(key)]
+    if len(matches) != 1:
+        print(f"找不到唯一一篇 UNID 開頭為 {key} 的文章（符合 {len(matches)} 篇）")
+        sys.exit(1)
+    entry = checklist[matches[0]]
+    entry.pop("joomla_review", None)
+    if target.lower() == "new":
+        entry["joomla_force_new"] = True        # 下次上傳時略過相似標題檢查
+        print(f"已標記為新文章，下次執行會上傳：{entry['subject']}")
+    elif target.isdigit():
+        entry["joomla_id"]          = int(target)
+        entry["joomla_existing"]    = True
+        entry["joomla_uploaded_at"] = NOW()
+        entry["joomla_note"]        = "相似標題人工確認為同一篇（--resolve）"
+        print(f"已對應到官網文章 {target}，不會上傳：{entry['subject']}")
+    else:
+        print("第二個參數請填 new 或 Joomla 文章 ID")
+        sys.exit(1)
+    save_checklist(checklist)
+    sys.exit(0)
+
+summary = {"run_at": NOW(), "dry_run": DRY_RUN, "error": None,
+           "created": [], "existing": [], "review": [], "failed": [], "review_open": 0}
+
 # ── 連線測試 ───────────────────────────────────────────
 print("測試 Joomla API 連線...")
 print(f"  URL  : {API_BASE}")
-print(f"  Token: {JOOMLA_TOKEN[:10]}...（前10碼）")
 try:
     r = requests.get(f"{API_BASE}/content/articles?page[limit]=1",
                      headers=HEADERS, timeout=10, verify=False,
                      allow_redirects=True)
-    print(f"  HTTP : {r.status_code}  最終URL: {r.url}")
-    print(f"  回應 : {r.text[:400]}")
+    print(f"  HTTP : {r.status_code}")
     r.raise_for_status()
     print(f"\n  連線成功！\n")
-except requests.exceptions.HTTPError as ex:
-    print(f"\n  連線失敗: {ex}")
-    print("  請確認 JOOMLA_URL / JOOMLA_TOKEN 是否正確，以及 Joomla API 是否已啟用")
-    exit(1)
 except Exception as ex:
     print(f"\n  連線失敗: {ex}")
-    exit(1)
+    print("  請確認 JOOMLA_URL / JOOMLA_TOKEN、Joomla API 外掛，以及網站伺服器的 API 白名單（見 README 功能三）")
+    summary["error"] = f"Joomla API 連線失敗: {ex}"
+    write_summary(summary)
+    sys.exit(1)
 
 # ── 主程式 ─────────────────────────────────────────────
 checklist = load_checklist()
 
 if not checklist:
     print("checklist.json 不存在或為空，請先執行 query_news.py 下載文章。")
-    exit()
-
-DRY_RUN = "--dry-run" in sys.argv
+    write_summary(summary)
+    sys.exit(0)
 
 pending = [(unid, e) for unid, e in checklist.items()
-           if "joomla_id" not in e and "joomla_skip" not in e]
+           if "joomla_id" not in e and "joomla_skip" not in e and "joomla_review" not in e]
 skipped = sum(1 for e in checklist.values() if "joomla_skip" in e)
+waiting = sum(1 for e in checklist.values() if "joomla_review" in e and "joomla_id" not in e)
 
 print(f"Checklist 共 {len(checklist)} 篇")
-print(f"已上傳/官網已有: {len(checklist) - len(pending) - skipped} 篇  /  不上傳: {skipped} 篇  /  待上傳: {len(pending)} 篇")
+print(f"已上傳/官網已有: {len(checklist) - len(pending) - skipped - waiting} 篇  /  不上傳: {skipped} 篇  /  "
+      f"待確認: {waiting} 篇  /  待上傳: {len(pending)} 篇")
 if DRY_RUN:
     print("【--dry-run】只查重、不上傳、不改 checklist")
 print("=" * 60)
 
-if not pending:
-    print("沒有待上傳的文章。")
-    exit()
-
-success_count  = 0
-existing_count = 0
-fail_count     = 0
+recent = []
+if pending:
+    try:
+        recent = fetch_recent_articles()
+    except Exception as ex:
+        # 拿不到近期文章就無法做相似標題檢查，寧可這次都不傳
+        print(f"[錯誤] 讀取官網近期文章失敗，本次不上傳: {ex}")
+        summary["error"] = f"讀取官網近期文章失敗: {ex}"
+        pending = []
 
 for unid, entry in pending:
     subject = entry["subject"]
     title   = clean_title(subject)
     folder  = os.path.join(OUTPUT_DIR, entry["folder"])
+    brief   = {"unid8": unid[:8].upper(), "date": entry["date"], "title": title}
     print(f"\n{'─'*60}")
     print(f"上傳：{entry['date']}  {title}")
 
     if not os.path.isdir(folder):
         print(f"  [錯誤] 找不到資料夾: {folder}，略過")
-        fail_count += 1
+        summary["failed"].append({**brief, "reason": "找不到本機資料夾"})
         continue
 
-    # ── 0. 查重：官網已有同標題文章（例如已人工上稿）就只記下 ID ──
+    # ── 0a. 查重：官網已有同標題文章（例如已人工上稿）就只記下 ID ──
     try:
         existing_id = find_existing_article(title)
     except Exception as ex:
         print(f"  [錯誤] 查重失敗，為避免重複建立文章先略過: {ex}")
-        fail_count += 1
+        summary["failed"].append({**brief, "reason": f"查重失敗: {ex}"})
         continue
     if existing_id:
         print(f"  官網已有此文章  Joomla ID={existing_id}，不重複上傳")
-        existing_count += 1
+        summary["existing"].append({**brief, "id": existing_id})
         if not DRY_RUN:
-            checklist[unid]["joomla_id"]          = existing_id
-            checklist[unid]["joomla_existing"]    = True
-            checklist[unid]["joomla_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            entry["joomla_id"]          = existing_id
+            entry["joomla_existing"]    = True
+            entry["joomla_uploaded_at"] = NOW()
             save_checklist(checklist)
         continue
+
+    # ── 0b. 相似標題：人工上稿時可能改過標題，交給人確認，不上傳 ──
+    if not entry.get("joomla_force_new"):
+        similar = find_similar_articles(title, entry["date"], recent)
+        if similar:
+            for aid, atitle, ratio in similar[:3]:
+                print(f"  官網有相似標題（{ratio}）: {aid} {atitle}")
+            print(f"  → 列為待確認，不上傳。處理方式: upload_joomla.py --resolve {brief['unid8']} new|<文章ID>")
+            summary["review"].append({**brief, "candidates": [list(s) for s in similar[:3]]})
+            if not DRY_RUN:
+                entry["joomla_review"] = {"candidates": [list(s) for s in similar[:3]], "flagged_at": NOW()}
+                save_checklist(checklist)
+            continue
+
     if DRY_RUN:
         print("  官網沒有此文章 → 會上傳圖片並建立草稿")
         continue
@@ -261,8 +360,7 @@ for unid, entry in pending:
     # 依日期 + UNID 前8碼組合子目錄：images/01news/2026/05/0513/BCE1730B
     d               = entry["date"]      # "2026/05/13"
     year, mon, day  = d[:4], d[5:7], d[8:10]
-    unid_short      = unid[:8].upper()
-    img_subdir      = f"{MEDIA_FOLDER}/{year}/{mon}/{mon}{day}/{unid_short}"
+    img_subdir      = f"{MEDIA_FOLDER}/{year}/{mon}/{mon}{day}/{brief['unid8']}"
 
     img_urls    = []
     img_tags    = {}
@@ -286,7 +384,7 @@ for unid, entry in pending:
     # 有任何一張圖失敗就不建立文章，下次重跑時整篇重來（圖片以 override 覆蓋，不會重複）
     if len(img_urls) < len(img_files):
         print(f"  {len(img_files) - len(img_urls)} 張圖片上傳失敗，本篇先不建立文章，下次重跑")
-        fail_count += 1
+        summary["failed"].append({**brief, "reason": f"{len(img_files) - len(img_urls)} 張圖片上傳失敗"})
         continue
 
     # ── 2. 組內文 HTML ───────────────────────────────
@@ -312,17 +410,21 @@ for unid, entry in pending:
     try:
         article_id = create_article(title, html_body, entry["date"], intro_image)
         print(f"  文章建立成功  Joomla ID={article_id}  （草稿）")
-        checklist[unid]["joomla_id"]          = article_id
-        checklist[unid]["joomla_uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry["joomla_id"]          = article_id
+        entry["joomla_uploaded_at"] = NOW()
         save_checklist(checklist)
-        success_count += 1
+        summary["created"].append({**brief, "id": int(article_id)})
     except Exception as ex:
         print(f"  文章建立失敗: {ex}")
         if hasattr(ex, "response") and ex.response is not None:
             print(f"  回應內容: {ex.response.text[:300]}")
-        fail_count += 1
+        summary["failed"].append({**brief, "reason": f"建立文章失敗: {ex}"})
+
+summary["review_open"] = sum(1 for e in checklist.values() if "joomla_review" in e and "joomla_id" not in e)
+write_summary(summary)
 
 print("\n" + "=" * 60)
-print(f"完成！成功 {success_count} 篇，官網已有 {existing_count} 篇，失敗 {fail_count} 篇")
-if success_count > 0:
+print(f"完成！新建草稿 {len(summary['created'])} 篇，官網已有 {len(summary['existing'])} 篇，"
+      f"待確認 {len(summary['review'])} 篇，失敗 {len(summary['failed'])} 篇")
+if summary["created"]:
     print(f"請至 Joomla 後台 → 文章管理 → 審核草稿後發佈")

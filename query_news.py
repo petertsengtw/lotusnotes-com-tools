@@ -1,9 +1,11 @@
 """
 新聞稿查詢工具 - 含圖片擷取 + 重複下載偵測
-用法: python query_news.py
+用法: python query_news.py              # 互動輸入起訖日期
+      python query_news.py --days 7     # 不詢問，抓最近 7 天（含今天），排程用
 """
+import argparse
 import win32com.client
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os, re, json
 import news_dxl
@@ -37,8 +39,17 @@ def ask_date(prompt):
         except ValueError:
             print("  格式錯誤，請輸入 YYYY/MM/DD")
 
-date_from = ask_date("起始日期 (YYYY/MM/DD): ")
-date_to   = ask_date("結束日期 (YYYY/MM/DD): ").replace(hour=23, minute=59, second=59)
+parser = argparse.ArgumentParser(description="從 Notes 擷取新聞稿文字與圖片")
+parser.add_argument("--days", type=int, help="不詢問日期，抓最近 N 天（含今天）")
+args = parser.parse_args()
+
+if args.days:
+    today     = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    date_from = today - timedelta(days=args.days - 1)
+    date_to   = today.replace(hour=23, minute=59, second=59)
+else:
+    date_from = ask_date("起始日期 (YYYY/MM/DD): ")
+    date_to   = ask_date("結束日期 (YYYY/MM/DD): ").replace(hour=23, minute=59, second=59)
 
 # ── 連線 Notes ────────────────────────────────────────
 notes = win32com.client.Dispatch("Lotus.NotesSession")

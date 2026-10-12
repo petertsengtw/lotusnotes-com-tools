@@ -71,8 +71,15 @@ MENU = [
     ("新聞稿", [
         {"title": "擷取新聞稿", "desc": "從 Lotus Notes 下載新聞稿（含圖片）",
          "script": "query_news.py"},
+        {"title": "上傳新聞稿到 Joomla（試跑）", "desc": "只查重、列出哪些會上傳／待確認，不上傳",
+         "script": "upload_joomla.py", "args": ["--dry-run"]},
         {"title": "上傳新聞稿到 Joomla", "desc": "把尚未上傳的新聞稿建立成 Joomla 草稿文章",
          "script": "upload_joomla.py"},
+        {"title": "處理待確認的新聞稿", "desc": "LINE 通知裡標題相似、待確認的文章：判斷是不是同一篇",
+         "script": "upload_joomla.py",
+         "prompts": [("UNID 前 8 碼（LINE 通知裡有）", "--resolve"), ("不同篇輸入 new／同一篇輸入官網文章 ID", None)]},
+        {"title": "新聞稿每日自動上稿（手動跑一次）", "desc": "擷取最近 7 天 → 上傳 → 有結果就發 LINE（排程跑的就是這支，需先關閉 Notes）",
+         "script": "news_daily.py"},
     ]),
     ("打卡（會實際操作 Lotus Notes）", [
         {"title": "簽到", "desc": "在 Lotus Notes 打卡系統執行簽到",

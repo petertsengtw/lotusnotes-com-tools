@@ -4,6 +4,7 @@ venv32/
 __pycache__/
 *.pyc
 checkin.log
+news_daily.log
 holidays.txt
 /output/
 store/output/
