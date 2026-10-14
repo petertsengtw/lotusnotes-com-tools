@@ -2,39 +2,37 @@
 互動式審核特約商店線上申請（sdd5.md §3、§4.4、§4.7、§4.8、§4.10）。
 用法:
     python apply_review.py                     # 審核 status=pending 的申請
-    python apply_review.py --status merchant_signed  # 處理店家已用印回傳、待人工蓋院方大小章的申請
+    python apply_review.py --status merchant_signed  # 核對店家回傳的同意書（商店印鑑、代表人簽章），確認後結案
     python apply_review.py --status approved   # 純瀏覽（例如看目前卡在等套版的申請）
     python apply_review.py --abandon 20260909-03     # 把指定申請標記為放棄/不予受理
     python apply_review.py --find 統編或店名或電話      # 店家忘了申請編號/查詢碼時，搜尋並顯示
 
 `--find` 會在所有狀態的申請裡搜尋（店名、負責人、聯絡人、統編、電話、Email、申請
-編號，部分符合即可，電話可帶或不帶橫線），列出符合申請的完整表單內容、狀態、合約期間、
+編號，部分符合即可，電話可帶或不帶橫線），列出符合申請的完整表單內容、狀態、同意書期間、
 處理進度（台灣時間）以及**查詢碼**。
-查詢碼是店家下載合約的唯一憑證，告訴對方之前請先核對身分（例如對方能說出統編、
+查詢碼是店家下載同意書的唯一憑證，告訴對方之前請先核對身分（例如對方能說出統編、
 留的電話跟申請資料相符）。
 
 `--status pending` 時逐筆審核；`--status merchant_signed` 時逐筆提示是否要
-下載檢查店家回傳的用印檔案、確認流程做完（列印、蓋院方大小章、掃描、透過 LINE
-Official Account Manager 手動傳回最終檔案給店家）後標記完成；其他狀態單純列出
-清單，不出現互動提示。
+下載檢查店家回傳的同意書，確認商店印鑑、代表人簽章都蓋好後標記完成；其他狀態
+單純列出清單，不出現互動提示。
 
-核准「使用店家制式範本」的申請前，會先下載店家上傳的合約書並用作業系統預設的
-關聯程式開啟，讓你人工看內容（比照本專案其他地方假設 Windows 環境的做法）。
+2026-10 起特約商店改簽「同意書」（sdd5.md §4.5.1）：店家申請時就選好適用期間
+（長期有效／至指定日期止），核准時不用再輸入起訖日，同意日自動填核准當天；店家
+在同意書蓋章回傳後，本院不用再用印、不用回傳最終檔案，核對無誤直接結案。核准後
+這筆申請會停在 approved，等 generate_contracts.py 套版產生同意書 PDF。
 
-核准「使用慈濟醫院合約範本」的申請時，會問合約起訖日（sdd5.md §4.5.1：這是人工
-決定的事，不是系統自動算，預設抓「今天起、一年後止」，直接按 Enter 接受，或自己
-輸入別的日期覆蓋）。核准後這筆申請會停在 approved，等 Phase 2 的
-generate_contracts.py 接手套版產生 PDF；「使用店家制式範本」核准後會直接變成
-contract_ready，因為合約內容就是店家自己上傳的那份，沒有套版這個動作。
+「使用店家制式範本」是改同意書之前的舊選項（申請表已不再提供），核准前會先下載
+店家上傳的合約書並用作業系統預設的關聯程式開啟，讓你人工看內容；核准後直接變成
+contract_ready，沒有套版這個動作。
 
-店家透過 LINE 官方帳號傳回用印掃描檔後（sdd5.md §4.7），狀態會自動變成
-merchant_signed，不需要在這裡手動標記——這裡負責的是「人工核對用印是否齊全
-之後」的後續動作。
+店家在網頁或 LINE 官方帳號傳回用印掃描檔後（sdd5.md §4.7、§4.7.1），狀態會自動
+變成 merchant_signed，不需要在這裡手動標記。
 """
 import argparse
 import os
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import requests
 import urllib3
@@ -76,13 +74,8 @@ def fetch_applications(status: str) -> list:
     return resp.json().get("applications", [])
 
 
-def submit_review(application_id: str, decision: str, review_note: str,
-                   contract_start_date: str = None, contract_end_date: str = None) -> dict:
+def submit_review(application_id: str, decision: str, review_note: str) -> dict:
     body = {"applicationId": application_id, "decision": decision, "reviewNote": review_note}
-    if contract_start_date:
-        body["contractStartDate"] = contract_start_date
-    if contract_end_date:
-        body["contractEndDate"] = contract_end_date
     resp = requests.post(
         f"{FUNCTIONS_BASE_URL}/admin_review_application",
         json=body,
@@ -145,14 +138,13 @@ def submit_update_status(application_id: str, status: str, final_doc_url: str = 
     return result
 
 
-def default_contract_dates() -> tuple:
-    """暫定規則（sdd5.md §4.5.1）：今天起、一年後止，2/29 遇到非閏年就退一天。"""
-    today = date.today()
-    try:
-        end = today.replace(year=today.year + 1)
-    except ValueError:
-        end = today.replace(month=2, day=28, year=today.year + 1)
-    return today.isoformat(), end.isoformat()
+def describe_validity(app: dict) -> str:
+    """店家申請時選的同意書適用期間（sdd5.md §4.5.1）。改同意書之前的申請沒有這個欄位。"""
+    if app.get("validityType") == "until_date":
+        return f"至 {app.get('validUntil')} 止"
+    if app.get("validityType") == "open_ended":
+        return "長期有效"
+    return "（舊申請，未選）"
 
 
 def print_application(app: dict):
@@ -164,8 +156,10 @@ def print_application(app: dict):
     print(f"優惠內容：{app['discountContent']}")
     if app.get("note"):
         print(f"備註：{app['note']}")
-    source_label = "慈濟醫院合約範本" if app["contractSource"] == "hospital_template" else "店家制式範本"
-    print(f"合約來源：{source_label}")
+    if app["contractSource"] == "hospital_template":
+        print(f"同意書適用期間：{describe_validity(app)}")
+    else:
+        print("來源：店家制式範本（改同意書前的舊選項）")
     print(describe_tax_id(app["taxId"]))
 
 
@@ -194,7 +188,7 @@ def matches_keyword(app: dict, keyword: str) -> bool:
 PROGRESS_FIELDS = (
     ("submittedAt", "送出"),
     ("reviewedAt", "審核"),
-    ("contractGeneratedAt", "產生合約"),
+    ("contractGeneratedAt", "產生同意書"),
     ("merchantSignedAt", "店家回傳用印"),
     ("completedAt", "結案"),
 )
@@ -214,18 +208,18 @@ def find_applications(keyword: str):
         print(f"找不到符合「{keyword}」的申請")
         return
 
-    print(f"共找到 {len(matched)} 筆符合「{keyword}」的申請（查詢碼是下載合約的憑證，告知前請先核對對方身分）")
+    print(f"共找到 {len(matched)} 筆符合「{keyword}」的申請（查詢碼是下載同意書的憑證，告知前請先核對對方身分）")
     for app in matched:
         print_application(app)
         print(f"查詢碼：{app.get('queryCode', '（無）')}")
         if app.get("contractStartDate"):
-            print(f"合約期間：{app['contractStartDate']} ～ {app.get('contractEndDate', '')}")
+            print(f"同意日：{app['contractStartDate']}　到期日：{app.get('contractEndDate') or '長期有效'}")
         if app.get("reviewNote"):
             print(f"審核備註：{app['reviewNote']}")
         print("處理進度：" + "　".join(f"{label} {to_taipei(app.get(key))}"
                                      for key, label in PROGRESS_FIELDS if app.get(key)))
         if app.get("contractUrl"):
-            print(f"合約檔：{app['contractUrl']}")
+            print(f"同意書檔：{app['contractUrl']}")
         if app.get("finalDocUrl"):
             print(f"最終檔案：{app['finalDocUrl']}")
 
@@ -248,29 +242,30 @@ def review_pending(app: dict):
         return
 
     note = input("審核備註（選填）：").strip()
-    contract_start_date = contract_end_date = None
-    if app["contractSource"] == "hospital_template":
-        default_start, default_end = default_contract_dates()
-        start_input = input(f"合約起始日（YYYY-MM-DD，直接 Enter 使用今天 {default_start}）：").strip()
-        contract_start_date = start_input or default_start
-        end_input = input(f"合約到期日（YYYY-MM-DD，直接 Enter 使用一年後 {default_end}）：").strip()
-        contract_end_date = end_input or default_end
-
-    result = submit_review(app["applicationId"], "approved", note, contract_start_date, contract_end_date)
+    result = submit_review(app["applicationId"], "approved", note)
     print(f"已核准：{result}")
+    if result.get("ok") and result.get("status") == "approved":
+        print("接著執行 generate_contracts.py（menu.py「產生同意書 PDF」）產生同意書。")
 
 
 def review_merchant_signed(app: dict):
-    """店家已透過 LINE 傳回用印掃描檔，狀態自動變成 merchant_signed（sdd5.md §4.7）；
-    這裡處理的是人工核對之後的動作（sdd5.md §4.8）：列印、蓋院方大小章、掃描、
-    透過 LINE Official Account Manager 手動傳回最終檔案給店家，都是這支腳本管不到
-    的實體動作，這裡只負責在你都做完之後把狀態標記成 completed。"""
+    """店家已在網頁或 LINE 傳回蓋好章的同意書，狀態自動變成 merchant_signed
+    （sdd5.md §4.7、§4.7.1）。同意書只需要店家核章（sdd5.md §4.8），人工核對商店
+    印鑑、代表人簽章齊全後就標記 completed，本院不用再用印、回傳最終檔案。"""
     print_application(app)
 
-    action = input("查看店家回傳的用印檔案請按 v，確認流程都做完了請按 c，跳過請直接按 Enter：").strip().lower()
+    if app.get("documentType") == "consent":
+        doc_name = "同意書"
+        confirm_prompt = "確認商店印鑑、代表人簽章都已蓋好，標記完成請按 c，跳過請直接按 Enter："
+    else:
+        # 改制前已產生的合約書仍是雙方用印，要蓋院方大小章並把最終檔案傳回店家。
+        doc_name = "合約（改制前產生，需雙方用印）"
+        confirm_prompt = "確認流程都做完了（列印、蓋院方大小章、掃描、已把最終檔案傳回店家）請按 c，跳過請直接按 Enter："
+
+    action = input(f"查看店家回傳的{doc_name}請按 v，確認無誤請按 c，跳過請直接按 Enter：").strip().lower()
     if action == "v":
         open_remote_file(app["applicationId"], "merchant_signed")
-        action = input("確認流程都做完了（列印、蓋院方大小章、掃描、已透過 LINE 傳回最終檔案給店家）請按 c，跳過請直接按 Enter：").strip().lower()
+        action = input(confirm_prompt).strip().lower()
 
     if action != "c":
         print("已跳過")

@@ -7,10 +7,12 @@ Firestore，好讓這些邏輯可以脫離 Cloud Functions 環境單獨測試（
 狀態機（sdd5.md §4.2）：
     pending -> approved -> contract_ready -> merchant_signed -> completed
             -> rejected
-自動套版（generate_contracts.py，sdd5.md §4.5.1）跟 LINE 身分綁定／用印回傳
-（sdd5.md §4.7、§4.8）是 Phase 2／Phase 3 才做的事，這裡只實作到「核准後，
-若為 own_template 直接進 contract_ready；若為 hospital_template 停在 approved，
-等 Phase 2 的 generate_contracts.py 接手」。
+核准後，hospital_template 停在 approved，等本機 generate_contracts.py 套版產生
+同意書 PDF 後轉 contract_ready（sdd5.md §4.5.1）；own_template（改同意書之前的
+舊選項，見 sdd5.md §4.5.2）核准當下直接進 contract_ready。
+
+2026-10 起特約商店改簽「同意書」：店家在同意書蓋商店印鑑、代表人簽章回傳即完成，
+本院不再用印回傳。Firestore 欄位沿用原本「contract」的命名，不另外搬資料。
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import hmac
 import re
 import secrets as pysecrets
 import string
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from google.cloud import firestore
 
@@ -34,7 +36,15 @@ CONTRACT_SOURCE_HOSPITAL = "hospital_template"
 CONTRACT_SOURCE_OWN = "own_template"
 CONTRACT_SOURCES = (CONTRACT_SOURCE_HOSPITAL, CONTRACT_SOURCE_OWN)
 
+# 同意書「三、適用期間」二選一（sdd5.md §4.5.1）：長期有效，或至指定日期止。
+VALIDITY_OPEN_ENDED = "open_ended"
+VALIDITY_UNTIL_DATE = "until_date"
+VALIDITY_TYPES = (VALIDITY_OPEN_ENDED, VALIDITY_UNTIL_DATE)
+
+TAIPEI_TZ = timezone(timedelta(hours=8))
+
 TAX_ID_RE = re.compile(r"^\d{8}$")
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SHORT_FIELD_MAX = 200
 LONG_FIELD_MAX = 2000
 
@@ -122,9 +132,32 @@ def file_signature_matches(content_type: str, file_bytes: bytes) -> bool:
     return bool(signature) and file_bytes.startswith(signature)
 
 
-def validate_application_fields(data: dict) -> str | None:
+def taipei_today() -> date:
+    return datetime.now(TAIPEI_TZ).date()
+
+
+def _validate_validity(data: dict, today: date) -> str | None:
+    validity_type = data.get("validityType")
+    if validity_type not in VALIDITY_TYPES:
+        return "invalid_validity_type"
+    if validity_type == VALIDITY_OPEN_ENDED:
+        return None
+    valid_until = (data.get("validUntil") or "").strip()
+    if not ISO_DATE_RE.match(valid_until):
+        return "invalid_valid_until"
+    try:
+        until = date.fromisoformat(valid_until)
+    except ValueError:
+        return "invalid_valid_until"
+    if until <= today:
+        return "valid_until_not_future"
+    return None
+
+
+def validate_application_fields(data: dict, today: date | None = None) -> str | None:
     """回傳 None 表示通過，否則回傳一個機器可讀的錯誤代碼。前端/後端都要驗證一次
-    （sdd5.md §5：apply 是完全公開的端點，不能只信任前端）。"""
+    （sdd5.md §5：apply 是完全公開的端點，不能只信任前端）。today 只給測試用，
+    預設取台灣時間今天。"""
     for field in REQUIRED_SHORT_FIELDS:
         value = (data.get(field) or "").strip()
         if not value:
@@ -152,6 +185,11 @@ def validate_application_fields(data: dict) -> str | None:
 
     if data.get("contractSource") not in CONTRACT_SOURCES:
         return "invalid_contract_source"
+
+    if data.get("contractSource") == CONTRACT_SOURCE_HOSPITAL:
+        error = _validate_validity(data, today or taipei_today())
+        if error:
+            return error
 
     if data.get("consentPersonalData") is not True:
         return "consent_required"
@@ -185,6 +223,9 @@ def create_application(db: firestore.Client, data: dict, ip: str, own_template_s
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     application_id = _next_application_id(db, today)
     query_code = generate_query_code()
+    valid_until = None
+    if data.get("validityType") == VALIDITY_UNTIL_DATE:
+        valid_until = data["validUntil"].strip()
 
     doc = {
         "storeName": data["storeName"].strip(),
@@ -198,6 +239,8 @@ def create_application(db: firestore.Client, data: dict, ip: str, own_template_s
         "discountContent": data["discountContent"].strip(),
         "note": (data.get("note") or "").strip(),
         "contractSource": data["contractSource"],
+        "validityType": data.get("validityType"),
+        "validUntil": valid_until,
         "ownTemplateStoragePath": own_template_storage_path,
         "consentPersonalData": True,
         "queryCode": query_code,
@@ -234,8 +277,22 @@ def check_query_code(application: dict, query_code: str) -> bool:
     return bool(expected) and hmac.compare_digest(query_code or "", expected)
 
 
+DOCUMENT_TYPE_CONSENT = "consent"
+
+
+def is_consent(application: dict) -> bool:
+    """這筆申請的文件是不是同意書（2026-10 改制後）。mark_contract_ready 會寫入
+    documentType；還沒產生文件的本院範本申請（審核中／已核准）之後產生的一定是同意書；
+    其餘沒有 documentType 的（改制前已產生的合約、店家制式範本）都是合約。"""
+    if application.get("documentType") == DOCUMENT_TYPE_CONSENT:
+        return True
+    if application.get("contractSource") != CONTRACT_SOURCE_HOSPITAL:
+        return False
+    return application.get("status") in (STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED)
+
+
 def mark_contract_ready(db: firestore.Client, application_id: str, contract_url: str) -> dict:
-    """Phase 2（generate_contracts.py）套版產生 PDF、上傳完成後回寫用（sdd5.md §4.5.1）。
+    """generate_contracts.py 套版產生同意書 PDF、上傳完成後回寫用（sdd5.md §4.5.1）。
     只有已核准（approved）的 hospital_template 申請可以轉 contract_ready；own_template
     的申請核准當下就已經直接轉 contract_ready 了（見 review_application），不會走到這裡。"""
     ref = db.collection("storeApplications").document(application_id)
@@ -248,6 +305,7 @@ def mark_contract_ready(db: firestore.Client, application_id: str, contract_url:
     ref.update({
         "status": STATUS_CONTRACT_READY,
         "contractUrl": contract_url,
+        "documentType": DOCUMENT_TYPE_CONSENT,
         "contractGeneratedAt": firestore.SERVER_TIMESTAMP,
     })
     return {"ok": True, "status": STATUS_CONTRACT_READY}
@@ -295,20 +353,29 @@ def list_applications(db: firestore.Client, status: str | None = None) -> list[d
     return results
 
 
+def consent_period(data: dict, approved_on: date) -> tuple[str, str | None]:
+    """核准時決定同意書的同意日與到期日（sdd5.md §4.5.1）。同意日＝核准當天（台灣
+    時間）；到期日依店家申請時選的適用期間，長期有效為 None。改同意書之前送出的申請
+    沒有 validityType，一律當長期有效。"""
+    if data.get("validityType") == VALIDITY_UNTIL_DATE and data.get("validUntil"):
+        return approved_on.isoformat(), data["validUntil"]
+    return approved_on.isoformat(), None
+
+
 def review_application(
     db: firestore.Client,
     application_id: str,
     decision: str,
     review_note: str,
-    contract_start_date: str | None = None,
-    contract_end_date: str | None = None,
 ) -> dict:
     """
     核准/婉拒一筆申請（sdd5.md §4.4、§4.5.2）。
 
-    hospital_template 核准後停在 approved，等 generate_contracts.py（Phase 2）套版
-    完才會轉 contract_ready；own_template 核准當下就直接轉 contract_ready，因為
-    contractUrl 就是店家自己上傳的那份檔案，沒有套版這個動作（見 sdd5.md §4.5.2）。
+    hospital_template 核准後停在 approved，等 generate_contracts.py 套版產生同意書
+    後才會轉 contract_ready；同意日（contractStartDate）與到期日（contractEndDate）
+    在核准當下依 consent_period() 寫入，不再由審核者輸入。own_template 核准當下就
+    直接轉 contract_ready，因為 contractUrl 就是店家自己上傳的那份檔案，沒有套版這個
+    動作（見 sdd5.md §4.5.2）。
     """
     if decision not in ("approved", "rejected"):
         return {"ok": False, "error": "invalid_decision"}
@@ -330,8 +397,7 @@ def review_application(
         return {"ok": True, "status": STATUS_REJECTED}
 
     if data.get("contractSource") == CONTRACT_SOURCE_HOSPITAL:
-        if not contract_start_date or not contract_end_date:
-            return {"ok": False, "error": "missing_contract_dates"}
+        contract_start_date, contract_end_date = consent_period(data, taipei_today())
         update["status"] = STATUS_APPROVED
         update["contractStartDate"] = contract_start_date
         update["contractEndDate"] = contract_end_date

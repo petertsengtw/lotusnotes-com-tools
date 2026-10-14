@@ -117,7 +117,7 @@
   <header>
     <h1>花蓮慈濟醫院特約商店加入申請</h1>
     <div class="rule"></div>
-    <div class="subtitle">查詢進度、下載合約、回傳用印文件都在這裡</div>
+    <div class="subtitle">查詢進度、下載同意書、回傳用印文件都在這裡</div>
   </header>
   <nav class="tabs">
     <a href="./join.html">加入特約</a>
@@ -127,7 +127,7 @@
 
   <div id="query-view" class="panel">
     <h2>查詢申請進度</h2>
-    <p class="hint">請輸入送出申請時取得的申請編號與查詢碼。之後合約備妥、需要回傳蓋好章的合約時，也是回來同一個網址、輸入同樣的編號與查詢碼操作，請先保留好。</p>
+    <p class="hint">請輸入送出申請時取得的申請編號與查詢碼。之後同意書備妥、需要回傳蓋好章的同意書時，也是回來同一個網址、輸入同樣的編號與查詢碼操作，請先保留好。</p>
     <div class="query-box">
       <label for="applicationId">申請編號</label>
       <input type="text" id="applicationId" placeholder="例：20260909-03" autocomplete="off">
@@ -155,15 +155,23 @@
 <script>
 const FUNCTIONS_BASE_URL = "__FUNCTIONS_BASE_URL__";
 
-const STATUS_LABELS = {
-  pending: "審核中",
-  approved: "已核准，合約製作中",
-  rejected: "很抱歉，本次申請未通過",
-  contract_ready: "合約已產生，可以下載",
-  merchant_signed: "已收到您回傳的用印文件，等待本院用印",
-  completed: "雙方用印完成",
-  abandoned: "本案已結案",
-};
+// 2026-10 起改簽「同意書」，店家蓋章回傳、本院核對後即完成，本院不再用印（sdd5.md
+// §4.5.1、§4.8）。改制前已產生的合約（後端回 isConsent=false）沿用原本的雙方用印說法。
+let docName = "同意書";
+let STATUS_LABELS = {};
+
+function setDocumentType(isConsent) {
+  docName = isConsent ? "同意書" : "合約";
+  STATUS_LABELS = {
+    pending: "審核中",
+    approved: `已核准，${docName}製作中`,
+    rejected: "很抱歉，本次申請未通過",
+    contract_ready: `${docName}已產生，可以下載`,
+    merchant_signed: isConsent ? "已收到您回傳的同意書，等待本院確認" : "已收到您回傳的用印文件，等待本院用印",
+    completed: isConsent ? "已完成，歡迎加入特約" : "雙方用印完成",
+    abandoned: "本案已結案",
+  };
+}
 
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
@@ -210,6 +218,7 @@ async function submitQuery() {
 }
 
 function renderResult(data, applicationId, queryCode) {
+  setDocumentType(data.isConsent !== false);
   document.getElementById("status-line").textContent = STATUS_LABELS[data.status] || data.status;
   document.getElementById("store-name").textContent = data.storeName;
 
@@ -225,17 +234,17 @@ function renderResult(data, applicationId, queryCode) {
 
   if (data.status === "pending" || data.status === "approved") {
     // 這個階段還沒有動作可做，但提醒店家「之後」要回來同一頁，避免他們以為
-    // 合約備妥後會有別的頁面或會收到通知（目前系統不會主動通知，見 sdd5.md §6）。
+    // 同意書備妥後會有別的頁面或會收到通知（目前系統不會主動通知，見 sdd5.md §6）。
     const note = document.createElement("p");
     note.className = "note";
-    note.textContent = "合約備妥後，請用同一個申請編號與查詢碼回來這個頁面，下載合約並上傳蓋好章的檔案，都在這一頁完成。";
+    note.textContent = `${docName}備妥後，請用同一個申請編號與查詢碼回來這個頁面，下載${docName}並上傳蓋好章的檔案，都在這一頁完成。`;
     extra.appendChild(note);
   }
 
   if (data.status === "contract_ready") {
     const banner = document.createElement("div");
     banner.className = "step-banner";
-    banner.innerHTML = "<strong>接下來請完成：</strong>① 下載合約　② 列印蓋章掃描　③ 在下方直接上傳，都在這一頁完成，不用另外找頁面。";
+    banner.innerHTML = `<strong>接下來請完成：</strong>① 下載${docName}　② 列印，蓋上商店印鑑及代表人簽章後掃描　③ 在下方直接上傳，都在這一頁完成，不用另外找頁面。`;
     extra.appendChild(banner);
 
     const url = data.contractSource === "own_template"
@@ -245,7 +254,7 @@ function renderResult(data, applicationId, queryCode) {
       const a = document.createElement("a");
       a.className = "download";
       a.href = url;
-      a.textContent = "① 下載合約 PDF";
+      a.textContent = `① 下載${docName} PDF`;
       a.target = "_blank";
       a.rel = "noopener";
       extra.appendChild(a);
@@ -269,14 +278,14 @@ const UPLOAD_ERRORS = {
   missing_fields: "請先選擇要上傳的檔案",
 };
 
-// 店家直接在網頁上傳蓋好章的合約掃描檔（sdd5.md §4.7.1）。身分核對就是剛剛查詢用的
+// 店家直接在網頁上傳蓋好章的同意書掃描檔（sdd5.md §4.7.1）。身分核對就是剛剛查詢用的
 // 申請編號+查詢碼，不需要店家再多做任何一步。
 function buildUploadBox(applicationId, queryCode, isReupload) {
   const box = document.createElement("div");
   box.className = "next-box";
 
   const h = document.createElement("h3");
-  h.textContent = isReupload ? "傳錯檔案了？可以重新上傳" : "③ 上傳蓋好章的合約";
+  h.textContent = isReupload ? "傳錯檔案了？可以重新上傳" : `③ 上傳蓋好章的${docName}`;
   box.appendChild(h);
 
   if (isReupload) {
@@ -342,7 +351,9 @@ function buildUploadBox(applicationId, queryCode, isReupload) {
         box.innerHTML = "";
         const done = document.createElement("p");
         done.className = "note";
-        done.textContent = "已收到您上傳的用印檔案，職工福利行政小組確認後會盡快與您聯繫後續事宜。";
+        done.textContent = docName === "同意書"
+          ? "已收到您上傳的用印檔案，職工福利行政小組確認無誤後即完成加入特約，如有問題會再與您聯繫。"
+          : "已收到您上傳的用印檔案，職工福利行政小組確認後會盡快與您聯繫後續事宜。";
         box.appendChild(done);
         return;
       }
@@ -380,12 +391,12 @@ function buildLineBox(applicationId, queryCode) {
   box.className = "next-box";
 
   const h = document.createElement("h3");
-  h.textContent = "用 LINE 傳回蓋好章的合約";
+  h.textContent = `用 LINE 傳回蓋好章的${docName}`;
   box.appendChild(h);
 
   const ol = document.createElement("ol");
   [
-    "下載合約、列印，蓋好公司大小章與負責人簽名後，掃描成一個 PDF（多頁請合併成同一個檔案）",
+    `下載${docName}、列印，蓋上商店印鑑及代表人簽章後，掃描成一個 PDF（多頁請合併成同一個檔案）`,
     "按下方綠色按鈕，會開啟 LINE 聊天視窗，核對訊息已經幫您填好，直接按「傳送」即可",
     "看到「已確認您是…」之後，再把掃描檔傳到同一個聊天視窗",
   ].forEach((t) => {

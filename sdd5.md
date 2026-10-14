@@ -1,6 +1,8 @@
-# SDD5 — 特約商店線上申請與合約套版流程
+# SDD5 — 特約商店線上申請與同意書套版流程
 
-規格驅動開發文件。設計「店家線上申請加入特約 → 職工福利小組審核 → 系統自動套版產生合約 PDF → 雙方用印往返 → 結案」的完整流程，取代現行 `store/web/join.html` 純聯絡資訊頁的做法。
+規格驅動開發文件。設計「店家線上申請加入特約 → 職工福利小組審核 → 系統自動套版產生同意書 PDF → 店家用印回傳 → 結案」的完整流程，取代現行 `store/web/join.html` 純聯絡資訊頁的做法。
+
+> **2026-10 改制：合約書改為同意書**（醫院決定，見 §4.5.1「改制說明」）。原本雙方用印的「特約廠商合約書」改成店家單方簽署的「特約商店同意書」：同意書只需要店家蓋商店印鑑、代表人簽章，**本院不再用印、也不再回傳最終檔案**，職工福利小組核對店家蓋章齊全即結案。申請表不再提供「使用店家制式範本」選項，改讓店家選擇優惠適用期間（長期有效／至指定日期止），核准時不再由審核者輸入合約起訖日。下文保留改制前的設計脈絡，與改制衝突處以 §4.5.1「改制說明」為準。
 
 **實作現況（2026-09-11）**：
 
@@ -63,7 +65,7 @@ flowchart TD
     D -- admin_review_application 核准/婉拒 --> B
 
     E([職工福利小組\ngenerate_contracts.py]) -- admin_list_applications 撈已核准未套版 --> B
-    E --> F[Word COM 開啟 template-store.doc 工作副本\nFind/Replace 套版 + 匯出 PDF\npywin32]
+    E --> F[Word COM 開啟 consent_template.docx\nFind/Replace 套版同意書 + 匯出 PDF\npywin32]
     F --> H[scp 上傳\nUbuntu 網站伺服器\n祕密路徑]
     E -- admin_mark_contract_ready --> B
 
@@ -81,8 +83,7 @@ flowchart TD
     M -- 用 Channel Access Token\n下載檔案內容 --> O[(Firebase Storage\nmerchant-uploads/)]
     M -- 更新狀態 merchant_signed --> C
 
-    P([職工福利小組\n人工核對用印+列印+蓋醫院大小章+掃描]) --> Q([LINE Official Account Manager\n手動把最終檔案傳給店家，人工操作])
-    P -- apply_review.py 標記完成 --> B
+    P([職工福利小組\n人工核對同意書已蓋商店印鑑、代表人簽章]) -- apply_review.py 標記完成 --> B
 ```
 
 ### 4.2 資料模型（Firestore）
@@ -101,14 +102,17 @@ flowchart TD
 | `businessCategory` | string | 營業類別 |
 | `discountContent` | string | 希望提供的優惠內容 |
 | `note` | string | 其他備註（選填） |
-| `contractSource` | string | `hospital_template`（使用慈濟醫院合約範本，走 §4.5.1 套版流程）\| `own_template`（使用店家制式範本，走 §4.5.2 直接上傳） |
+| `contractSource` | string | `hospital_template`（使用慈濟醫院範本，走 §4.5.1 套版流程；2026-10 改制後 `apply.html` 一律送這個值）\| `own_template`（使用店家制式範本，走 §4.5.2 直接上傳；改制後表單已不提供，僅保留相容舊資料） |
+| `validityType` | string \| null | 2026-10 新增，同意書「三、適用期間」：`open_ended`（長期有效，建議）\| `until_date`（至指定日期止）。`hospital_template` 必填，改制前的申請沒有這個欄位 |
+| `validUntil` | string \| null | 2026-10 新增，`validityType == "until_date"` 時的截止日（`YYYY-MM-DD`，後端驗證必須晚於台灣時間今天） |
+| `documentType` | string \| null | 2026-10 新增，`admin_mark_contract_ready` 回寫時設為 `consent`，用來區分改制前已產生的合約（沒有這個欄位，仍是雙方用印流程） |
 | `ownTemplateStoragePath` | string \| null | 店家上傳的自有合約書在 Firebase Storage 裡的路徑（僅 `contractSource == "own_template"` 時，送出表單當下就有值）。**實作時改成存 Storage 路徑而不是外部網址**——bucket 規則整個鎖死，前端拿不到可以直接打開的網址，一律要透過 `download_file` 端點驗證身分後才能讀取（見 §4.4、§4.5.2） |
 | `consentPersonalData` | boolean | 個資蒐集告知同意勾選，必須為 `true` 才能送出 |
 | `queryCode` | string | 送出當下產生的隨機查詢碼（建議 8 碼英數），僅顯示給申請人一次，後續查詢進度用 |
 | `status` | string | `pending` \| `approved` \| `rejected` \| `contract_ready` \| `merchant_signed` \| `completed` \| `abandoned` |
 | `reviewNote` | string | 婉拒理由或審核備註 |
 | `contractUrl` | string \| null | 合約下載資訊（`contract_ready` 之後才有值）。`hospital_template` 路徑是 Ubuntu 上的直接外部網址；`own_template` 路徑核准當下直接等於 `ownTemplateStoragePath`（Storage 路徑，不是外部網址，前端一樣要透過 `download_file` 端點才能下載，見 `application_status` 的回應設計） |
-| `contractStartDate`／`contractEndDate` | date \| null | 合約起訖日（僅 `hospital_template` 路徑）。**由職工福利小組審核核准時人工指定**，透過 `admin_review_application` 寫入（見 §4.4），不是系統自動算的 |
+| `contractStartDate`／`contractEndDate` | date \| null | 僅 `hospital_template` 路徑。**2026-10 改制後**：核准時由後端自動寫入——`contractStartDate`＝核准當天（台灣時間，即同意書的同意日），`contractEndDate`＝店家選的 `validUntil`，長期有效為 `null`。改制前是審核者人工輸入的合約起訖日 |
 | `finalDocUrl` | string \| null | 雙方用印完成的最終檔案網址（`completed` 之後才有值，選填，供申請人日後也能重新下載） |
 | `submittedIp` | string | 送出時的來源 IP，僅供防濫用排查用 |
 | `submittedAt`／`reviewedAt`／`contractGeneratedAt`／`merchantSignedAt`／`completedAt` | timestamp | 各狀態轉換時間戳 |
@@ -144,8 +148,8 @@ flowchart TD
 | `application_status` | 公開，需帶 `applicationId` + `queryCode` | 比對 `queryCode` 正確才回傳該筆狀態，錯誤一律回「查無資料」（不透露是編號錯還是碼錯，避免被拿來枚舉） |
 | `download_file` | 公開（帶 `applicationId`+`queryCode`）或 admin（帶 `X-Admin-Secret`），兩種擇一通過即可 | Firebase Storage 檔案唯一對外出口（見 §4.5.2、§4.7）。`kind=own_template` 下載店家自有合約書；`kind=merchant_signed` 下載店家透過 LINE 回傳的用印掃描檔。申請人查詢自己的申請時用查詢碼，`apply_review.py` 審核時看檔案內容用 admin 密鑰 |
 | `admin_list_applications` | admin（`ADMIN_SHARED_SECRET`） | 依 `status` 篩選列出申請，供本機審核/套版腳本撈取 |
-| `admin_review_application` | admin | 帶 `applicationId` + `decision`（approved/rejected）+ `reviewNote`，更新狀態；核准且 `contractSource == "hospital_template"` 時，**必須一併帶 `contractStartDate`／`contractEndDate`**（職工福利小組人工指定的合約起訖日，見 §4.5.1）；核准且 `contractSource == "own_template"` 時，額外把 `ownTemplateFileUrl` 複製成 `contractUrl` 並直接轉為 `contract_ready`（見 §4.5.2） |
-| `admin_mark_contract_ready` | admin | 帶 `applicationId` + `contractUrl`，套版上傳完成後回寫，狀態轉為 `contract_ready` |
+| `admin_review_application` | admin | 帶 `applicationId` + `decision`（approved/rejected）+ `reviewNote`，更新狀態；核准且 `contractSource == "hospital_template"` 時，後端依店家選的適用期間自動寫入 `contractStartDate`／`contractEndDate`（2026-10 改制，原本要由審核者帶入，見 §4.5.1）；核准且 `contractSource == "own_template"` 時，額外把 `ownTemplateFileUrl` 複製成 `contractUrl` 並直接轉為 `contract_ready`（見 §4.5.2） |
+| `admin_mark_contract_ready` | admin | 帶 `applicationId` + `contractUrl`，套版上傳完成後回寫，狀態轉為 `contract_ready`，並寫入 `documentType = "consent"` |
 | `admin_update_status` | admin | 通用狀態轉換端點，供 `merchant_signed`／`completed`／`abandoned` 這幾個純人工判斷的狀態轉換使用（`line_webhook` 收到用印檔案時走 §4.7 自己的邏輯自動轉 `merchant_signed`，不呼叫這裡），`completed` 時可一併帶 `finalDocUrl` |
 | `line_webhook` | 公開，但需驗證 LINE 簽章 | 店家 LINE 官方帳號的 webhook，處理身分綁定與用印檔案接收，見 §4.7 |
 
@@ -155,7 +159,34 @@ flowchart TD
 
 申請表單的「合約來源」選項，決定核准後怎麼產生用來列印用印的檔案，兩條路徑只在「核准之前」不一樣，§4.6 起（下載、LINE 回傳、結案）完全共用。
 
-#### 4.5.1 使用慈濟醫院合約範本（`contractSource == "hospital_template"`）
+#### 4.5.1 使用慈濟醫院範本（`contractSource == "hospital_template"`）
+
+**改制說明（2026-10，以本段為準）**：醫院決定特約商店由「合約書」改簽「同意書」（原稿：職工福利委員會「附件一、特約商店同意書_花蓮慈院版」，複製到 `store/template-consent.docx`）。對系統的影響：
+
+| 項目 | 改制前（合約書） | 改制後（同意書） |
+|---|---|---|
+| 套版範本 | `store/template-store.doc` → `prepare_contract_template.py`（Word COM 限定段落 Find/Replace）→ `templates/contract_template.doc` | `store/template-consent.docx` → `prepare_consent_template.py`（純 Python 改 `word/document.xml`，每處替換要求原文剛好出現一次）→ `templates/consent_template.docx`；舊的三個檔案已刪除（git 歷史仍可取回） |
+| 申請表 | 選合約來源（本院範本／店家制式範本） | 不再選來源（一律本院範本），新增「優惠適用期間」：長期有效（建議）／至指定日期止＋日期 |
+| 核准 | 審核者輸入合約起訖日（預設今天起一年） | 不用輸入；同意日＝核准當天，到期日＝店家選的日期或長期有效 |
+| 用印 | 店家蓋大小章回傳 → 本院蓋大小章 → 傳回最終檔案給店家 → 結案 | 店家蓋商店印鑑、代表人簽章回傳 → 職工福利小組核對 → 結案（本院不用印、不回傳） |
+| 查詢頁用字 | 合約 | 同意書；`application_status` 回 `isConsent`，改制前已產生的合約（永諦、榆芝）仍顯示合約與雙方用印說法 |
+
+同意書欄位對照（`prepare_consent_template.py` 的替換對照）：
+
+| 同意書上的空格 | 佔位符 | 對應資料 |
+|---|---|---|
+| 前言「本公司（機構、商號）＿＿＿，」 | `{{store_name}}`（加底線） | `storeName` |
+| 一、優惠 三行底線 | `{{discount_content}}`（第一行，其餘兩行刪除） | `discountContent`，換行轉段落內換行逐行呈現 |
+| 三、適用期間兩個「□」 | `{{box_open}}`／`{{box_until}}` | 依 `contractEndDate` 有無勾選其一（☑） |
+| 三、「至中華民國＿年＿月＿日止」 | `{{until_y}}`／`{{until_m}}`／`{{until_d}}` | `contractEndDate` 轉民國；長期有效時套回底線 |
+| 三、「※ 建議勾選第一項…」 | 刪除 | 已在申請表上讓店家選好，印出的同意書不需要 |
+| 立同意書人：商店名稱／統一編號／代表人／地址／電話／聯絡人／電子郵件 | `{{store_name}}`／`{{tax_id}}`／`{{owner_name}}`／`{{address}}`／`{{phone}}`／`{{contact_person}}`／`{{email}}` | 聯絡人留空時填負責人 |
+| 文末「中華民國　年　月　日」 | `{{sign_y}}`／`{{sign_m}}`／`{{sign_d}}` | `contractStartDate`（核准日） |
+| 頁首「草稿（送法務室審閱用，非正式版本）」 | 刪除 | 法務定稿後換掉 `template-consent.docx` 重跑 `prepare_consent_template.py` 即可 |
+
+已用 `preview_contract.py`（長期有效、`--until` 兩種）實際套版檢查：第 1 頁條文、第 2 頁個資條款＋立同意書人表格＋日期、第 3 頁識別證樣張，與原稿版面一致。
+
+以下為改制前合約書的原始設計，保留供參考：
 
 本機新腳本 `store/generate_contracts.py`：
 
@@ -270,7 +301,9 @@ flowchart TD
 
 ### 4.8 用印回傳與結案流程
 
-延續 §4.7 的身分綁定，實際的用印往返步驟：
+> **2026-10 改制後**：同意書只需店家核章，下表「列印、蓋院方大小章、掃描」「把最終合約傳回店家」兩步取消，職工福利小組核對店家蓋章齊全後直接執行 `apply_review.py --status merchant_signed` 標記完成。改制前已產生的合約（`documentType` 為空）仍照下表雙方用印，`apply_review.py` 會依此顯示不同的確認提示。
+
+延續 §4.7 的身分綁定，實際的用印往返步驟（改制前）：
 
 | 步驟 | 執行者 | 系統參與程度 |
 |---|---|---|
@@ -326,7 +359,7 @@ flowchart TD
 ## 6. 已知限制 / 待確認事項
 
 1. ~~需要拿到現行合約書範本的實際檔案~~ **已解決**：PDF 版「特約廠商合約(含花慈資料).pdf」與原始 Word 檔 `store/template-store.doc` 都已取得，兩者內容比對一致，實際欄位對照已整理進 §4.5.1。**範本準備也已經自動化並實測完成**（`store/prepare_contract_template.py`）：不需要人工用 Word 手動編輯插入佔位符，改成用 Word COM 對已核對過的段落位置做限定範圍的 Find/Replace，跑過一次、重開輸出檔案逐段核對，內容跟表格結構都正確——比原本設計「請職工福利小組手動在 Word 裡打字插入」更不容易出錯，也更容易在範本改版時重新產生。
-2. ~~合約起訖日期怎麼決定~~ **已解決**：由職工福利小組審核核准時人工指定（`apply_review.py` 核准流程會詢問），不是系統自動算的，見 §4.2、§4.4、§4.5.1。
+2. ~~合約起訖日期怎麼決定~~ **已解決**：改制前由職工福利小組審核核准時人工指定；**2026-10 改同意書後**改由店家在申請表選適用期間，同意日自動填核准當天，見 §4.5.1「改制說明」。
 3. ~~甲方（本院）聯絡人/聯絡電話的固定值~~ **已解決**：曾建瑋／03-8561825 轉 15295，見 §4.5.1。
 4. ~~這台機器是否已安裝 MS Word~~ **已解決**：已確認裝有 MS Word（`C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE`），§4.5.1 步驟 3 直接用 Word COM 轉 PDF，不需要 LibreOffice。
 5. **個資告知同意的標準文字**：已先草擬一版放在附錄 A，**仍需送福委會或院方法務確認/修改後才能正式使用**，工程端只負責把同意勾選框做成必填。
@@ -342,6 +375,8 @@ flowchart TD
 15. **乙方簽名區（表格欄位）遇到很長的店名仍會硬換行**：跟簽約日期擠成獨立一頁那個問題（已解決，見 §4.5.1）不同——那個是整體版面高度問題，這個是甲乙雙方並排資訊表格本身的欄寬限制，實測店名很長（例如登記為「○○股份/有限公司」的長全銜）時，「乙方：」那個欄位還是會卡在欄寬硬換行。優先度低（多數特約商店是小吃店/商店類，店名通常不會這麼長），先不處理，之後真的常遇到再考慮加寬該欄位。
 16. ~~`line_webhook` 誤把不相關使用者的一般聊天當成綁定失敗~~ **已解決（2026-09-14）**：「花蓮職工福利小組」這個 LINE 官方帳號是**共用**的——既有同仁（約 400 人，透過 `sdd3.md` 的 LIFF 查詢優惠）跟外部店家（本專案的聊天綁定）都是同一個帳號的好友。上線後真實回報：同仁隨手傳一句話給這個帳號，也會收到「格式不正確，請輸入『申請編號 查詢碼』…」的錯誤回覆，因為原本的邏輯是「只要還沒綁定，任何文字/檔案訊息都當作店家在嘗試輸入申請編號」。修法：`merchant_binding.looks_like_binding_attempt(text)` 先用正規表示式判斷訊息內容像不像申請編號格式（`\d{8}-\d+`，即 8 碼日期-序號），完全不像的訊息（一般閒聊、貼圖、隨手傳的照片等）一律不回覆、靜默略過，只有像的時候才進入 `try_bind()` 實際核對並回覆結果。取捨：這個 heuristic 只看「像不像」，同仁如果剛好打出符合格式的文字（例如自己隨手打的日期）仍會被誤判進入綁定流程——但頂多是核對失敗，不會誤綁定成功，換來的是絕大多數不相關訊息都不再打擾同仁，先以此上線觀察，之後如有需要再收斂判斷邏輯。
 17. ~~優惠內容超過 255 字元時套版失敗~~ **已解決（2026-10-02）**：`generate_contracts.py` 原本用 Word 的 `Find.Replacement.Text` 取代佔位符，Word 規定「取代為」最多 255 字元，真實申請（`20261001-01`，優惠內容 293 字、條列五大項）套版時報「字串參數太長」（錯誤發生在產生 PDF 階段，尚未上傳也未回寫狀態，修正後重跑即可）。改成逐一找到佔位符後直接改寫該 Range 文字，沒有長度限制；換行統一轉成段落內換行（`\x0b`）。實測 293 字的優惠內容版面：條文佔滿第 1 頁，甲乙雙方資料與簽約日期一起排到第 2 頁（簽約日期沒有獨占一頁，§4.5.1 的問題未復發），附件識別證樣張在第 3 頁；短優惠內容的版面與修正前相同。
+18. **改制前已產生、尚未結案的合約**（2026-10）：永諦工程行（20261001-01）、榆芝小舖（20260916-01）的合約書在改制前就已產生、等店家用印。系統維持原本雙方用印流程（查詢頁顯示「合約」、`apply_review.py` 提示要蓋院方大小章），**要不要改請店家簽新的同意書由職工福利小組決定**；若要改發同意書，目前沒有「重新產生」的端點，需要另外處理（例如請店家重新線上申請）。
+19. **Notes 到期日與「長期有效」**：同意書選長期有效時 `contractEndDate` 為空，職工福利小組把店家建進 `ContributingStore.nsf` 時，`expire` 欄位要填什麼（留空或一個很遠的日期）需要配合 `expiry_report.py` 到期提醒的判斷方式決定。
 
 ## 7. 驗收標準
 
@@ -381,6 +416,8 @@ flowchart TD
 - [ ] `apply_status.html` 上傳區塊用真實瀏覽器（電腦＋手機）操作一輪，錯誤訊息顯示正確——已部署上線，尚未有人實際操作過畫面
 
 ## 附錄 A：個人資料蒐集、處理及利用告知事項（草稿，待法務確認）
+
+> 2026-10 改同意書後，`apply.html` 上的告知文字已把「合約簽訂／合約用印往返」改為「同意書簽署／同意書用印回傳」，以頁面上的版本為準。另外同意書本身第六條也有個資條款。
 
 > **這是工程端先草擬的版本，依「個人資料保護法」第八條應告知的五個項目寫的，正式上線前務必送福委會或院方法務確認用詞是否符合院內既有的個資告知慣例，必要時修改。** 放在 `apply.html` 表單的同意勾選框旁邊，勾選前應完整顯示。
 

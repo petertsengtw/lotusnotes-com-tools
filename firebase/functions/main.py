@@ -10,8 +10,8 @@ Cloud Functions（2nd gen, Python）進入點。sdd3.md §5 存取控制的後�
   admin_import_roster  admin-only，本機 import_roster.py 呼叫
   apply                 公開，store/web/apply.html 呼叫，店家送出加入特約申請（sdd5.md）
   application_status    公開，store/web/apply_status.html 呼叫，帶申請編號+查詢碼查進度
-  upload_signed_file    公開，store/web/apply_status.html 呼叫，店家上傳蓋好章的合約掃描檔（sdd5.md §4.7.1）
-  download_file        公開＋admin 兩種呼叫者皆可，下載店家自有合約書（sdd5.md §4.5.2）
+  upload_signed_file    公開，store/web/apply_status.html 呼叫，店家上傳蓋好章的同意書掃描檔（sdd5.md §4.7.1）
+  download_file        公開＋admin 兩種呼叫者皆可，下載店家自有合約書／用印回傳檔（sdd5.md §4.5.2）
   admin_list_applications   admin-only，本機 apply_review.py 呼叫
   admin_review_application  admin-only，本機 apply_review.py 呼叫
   admin_mark_contract_ready admin-only，本機 generate_contracts.py 呼叫（sdd5.md §4.5.1）
@@ -240,8 +240,8 @@ def apply(req: https_fn.Request) -> https_fn.Response:
     店家線上申請加入特約（sdd5.md §4.3、§4.4）。完全公開、無需登入，必須假設會被
     任何人呼叫——欄位驗證、蜜罐欄位、IP 頻率限制都在這裡把關，不能只信任前端。
 
-    選「使用店家制式範本」時，前端用 multipart/form-data 把檔案跟其他欄位一起送來；
-    選「使用慈濟醫院合約範本」則是一般 JSON body，兩種都要能處理。
+    apply.html 目前一律送 JSON（contractSource=hospital_template，套版產生同意書）；
+    multipart 是改同意書之前「使用店家制式範本」附檔上傳的路徑，保留相容。
     """
     if req.method != "POST":
         return _json_response({"ok": False, "error": "method_not_allowed"}, 405)
@@ -311,6 +311,8 @@ def application_status(req: https_fn.Request) -> https_fn.Response:
         "storeName": application["storeName"],
         "reviewNote": application.get("reviewNote") or "",
         "contractSource": application.get("contractSource"),
+        # 前端用來決定顯示「同意書」或「合約」（改制前已產生的合約仍是雙方用印流程）。
+        "isConsent": applications.is_consent(application),
         # hospital_template 的 contractUrl 是 Ubuntu 上的直接網址（見 §4.5.1），
         # own_template 的檔案在 Storage 裡，前端要自己組 download_file 的網址，
         # 不能直接把 Storage 路徑當網址回傳給瀏覽器。
@@ -322,7 +324,7 @@ def application_status(req: https_fn.Request) -> https_fn.Response:
 @https_fn.on_request(cors=_PUBLIC_CORS)
 def upload_signed_file(req: https_fn.Request) -> https_fn.Response:
     """
-    店家在 apply_status.html 直接上傳蓋好章的合約掃描檔（sdd5.md §4.7.1），跟 LINE
+    店家在 apply_status.html 直接上傳蓋好章的同意書掃描檔（sdd5.md §4.7.1），跟 LINE
     聊天視窗回傳（§4.7）是兩個並行的管道，最後都走 merchant_binding.receive_file()
     存檔並把狀態轉成 merchant_signed。
 
@@ -442,15 +444,11 @@ def admin_review_application(req: https_fn.Request) -> https_fn.Response:
     application_id = (body.get("applicationId") or "").strip()
     decision = (body.get("decision") or "").strip()
     review_note = (body.get("reviewNote") or "").strip()
-    contract_start_date = (body.get("contractStartDate") or "").strip() or None
-    contract_end_date = (body.get("contractEndDate") or "").strip() or None
 
     if not application_id or not decision:
         return _json_response({"ok": False, "error": "missing_fields"}, 400)
 
-    result = applications.review_application(
-        _db(), application_id, decision, review_note, contract_start_date, contract_end_date
-    )
+    result = applications.review_application(_db(), application_id, decision, review_note)
     return _json_response(result, 200 if result.get("ok") else 400)
 
 

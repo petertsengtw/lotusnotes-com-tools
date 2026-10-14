@@ -7,7 +7,7 @@
 - **功能三・上傳至 Joomla**：把擷取到的新聞稿透過 REST API 上傳到 Joomla 4 官網，存成草稿文章（圖片放回原位、圖說在下、自動設摘要圖片）；上傳前查重，標題相似的列為待確認。**每週一 07:00 排程自動跑**，有新草稿或待確認時用 LINE 通知
 - **功能四・特約商店查詢頁**：從 Notes 資料庫匯出特約商店優惠清單，部署成一個**限本院同仁使用**的查詢頁；同仁透過 LINE 官方帳號（LINE@）加好友、在 LIFF 頁完成身分綁定驗證後即可查詢，後端為 Firebase Cloud Functions + Firestore
 - **功能五・福利公告查詢**：從院內公佈欄匯出職工福利行政小組發布的公告（含圖片），部署成另一個限本院同仁使用的查詢頁，跟功能四共用同一套 LINE 身分驗證，但公告資料存在 Ubuntu 網站伺服器，不進 Firebase
-- **功能六・特約商店線上申請**：店家線上填表申請加入特約（可選用本院合約範本或直接上傳自有合約書），職工福利小組審核後續接手產生/核准合約，店家蓋章後可直接在網頁上傳或透過 LINE 官方帳號回傳掃描檔，取代原本純電話/Email 聯繫的方式，詳見 `sdd5.md`
+- **功能六・特約商店線上申請**：店家線上填表申請加入特約，職工福利小組審核通過後系統自動產生「特約商店同意書」PDF（2026-10 起由合約書改為同意書，只需店家核章），店家蓋章後可直接在網頁上傳或透過 LINE 官方帳號回傳掃描檔，取代原本純電話/Email 聯繫的方式，詳見 `sdd5.md`
 
 各功能的詳細說明見下方對應章節。
 
@@ -15,7 +15,7 @@
 
 ## 系統流程圖
 
-> 下圖涵蓋功能一～五。功能六（特約商店線上申請，含表單、審核、合約套版、LINE 綁定與用印回傳）自成一套較複雜的流程，畫在 `sdd5.md` 開頭的流程圖裡，不重複畫在這裡。
+> 下圖涵蓋功能一～五。功能六（特約商店線上申請，含表單、審核、同意書套版、LINE 綁定與用印回傳）自成一套較複雜的流程，畫在 `sdd5.md` 開頭的流程圖裡，不重複畫在這裡。
 
 ```mermaid
 flowchart TD
@@ -425,7 +425,7 @@ venv32\Scripts\python.exe sync_all.py
 
 ## 功能六：特約商店線上申請（`store/`，見 `sdd5.md`）
 
-取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約，可選「使用慈濟醫院合約範本」或直接上傳「店家制式範本」；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後若為慈濟醫院範本，`generate_contracts.py` 會自動套版產生 PDF；店家用印完成後，直接回到 `apply_status.html` 同一頁上傳掃描檔即可（主要管道，見 `sdd5.md` §4.7.1），也可以改加入 LINE 官方帳號完成身分核對後在聊天視窗傳回，不用寄 Email。**Phase 1、Phase 2、Phase 3 都已部署到正式環境，核心流程用真實資料/真實 LINE 帳號驗收通過**（2026-09-14）。詳見 `sdd5.md` §7 各項勾選狀態。
+取代原本 `store/web/join.html` 純聯絡資訊頁的做法：店家在 `store/web/apply.html` 線上填表申請加入特約（含優惠內容、優惠適用期間「長期有效／至指定日期止」）；職工福利小組用 `apply_review.py` 互動式審核（含 §4.10 統一編號真實性查證），核准後 `generate_contracts.py` 把申請資料套進**特約商店同意書**產生 PDF；店家在同意書蓋上商店印鑑及代表人簽章後，直接回到 `apply_status.html` 同一頁上傳掃描檔即可（主要管道，見 `sdd5.md` §4.7.1），也可以改加入 LINE 官方帳號完成身分核對後在聊天視窗傳回，不用寄 Email；職工福利小組核對已蓋章就結案，**本院不用再用印、回傳最終檔案**。**Phase 1、Phase 2、Phase 3 都已部署到正式環境，核心流程用真實資料/真實 LINE 帳號驗收通過**（2026-09-14）；2026-10 起合約書改為同意書（`sdd5.md` §4.5.1），詳見 `sdd5.md` §7 各項勾選狀態。
 
 ```powershell
 # 部署 apply.html / apply_status.html 到 Ubuntu 網站伺服器
@@ -437,31 +437,31 @@ venv32\Scripts\python.exe store\apply_review.py
 # 純瀏覽其他狀態的申請（不會進入審核提示）
 venv32\Scripts\python.exe store\apply_review.py --status approved
 
-# 一次性：把 template-store.doc 轉成含 {{...}} 佔位符的套版範本（範本改版才需要重跑）
-venv32\Scripts\python.exe store\prepare_contract_template.py
+# 一次性：把 template-consent.docx（同意書原稿）轉成含 {{...}} 佔位符的套版範本（同意書改版才需要重跑）
+venv32\Scripts\python.exe store\prepare_consent_template.py
 
-# 把已核准（慈濟醫院範本）的申請套版產生 PDF、上傳、回寫下載網址
+# 把已核准的申請套版產生同意書 PDF、上傳、回寫下載網址
 venv32\Scripts\python.exe store\generate_contracts.py
 ```
 
-**`.env` 新增欄位**（`generate_contracts.py` 用，組出合約 PDF 對外的下載網址）：
+**`.env` 新增欄位**（`generate_contracts.py` 用，組出同意書 PDF 對外的下載網址）：
 
 ```
 STORE_PUBLIC_BASE_URL=https://hlm.tzuchi.com.tw/store
 ```
 
-**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`upload_signed_file`（公開，店家在查詢頁直接上傳蓋好章的合約掃描檔，主要回傳管道，見 `sdd5.md` §4.7.1）、`download_file`（公開＋admin，下載店家自有合約書／用印回傳掃描檔）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`／`admin_update_status`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）、`line_webhook`（公開但驗證 LINE 簽章，處理店家 LINE 身分綁定與用印檔案接收，見下方）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書、LINE 回傳的用印掃描檔都存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `STORAGE_BUCKET_NAME`（原本想叫 `FIREBASE_STORAGE_BUCKET`，但 `firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_` 開頭的變數名稱，實測部署失敗才改名）。
+**Cloud Functions 新增端點**（`firebase/functions/main.py`）：`apply`（公開，店家送出申請）、`application_status`（公開，查詢進度）、`upload_signed_file`（公開，店家在查詢頁直接上傳蓋好章的同意書掃描檔，主要回傳管道，見 `sdd5.md` §4.7.1）、`download_file`（公開＋admin，下載店家自有合約書／用印回傳掃描檔）、`admin_list_applications`／`admin_review_application`／`admin_mark_contract_ready`／`admin_update_status`（admin-only，分別給 `apply_review.py`／`generate_contracts.py` 呼叫）、`line_webhook`（公開但驗證 LINE 簽章，處理店家 LINE 身分綁定與用印檔案接收，見下方）。這是本專案第一次用到 **Firebase Storage**（店家上傳的自有合約書、LINE 回傳的用印掃描檔都存在這裡，bucket 規則整個鎖死，只有 Admin SDK 能讀寫），`firebase/functions/.env` 需新增 `STORAGE_BUCKET_NAME`（原本想叫 `FIREBASE_STORAGE_BUCKET`，但 `firebase deploy` 會拒絕 `.env` 裡以 `FIREBASE_` 開頭的變數名稱，實測部署失敗才改名）。
 
 **統一編號查證的已知限制**（`store/tax_id_lookup.py`，見 `sdd5.md` §4.10、§6）：「統編查公司名稱」（公司登記）實測免申請即可用；「商業統一編號查商號名稱」（商業/商號登記，特約商店裡更常見的類型）實測需要向經濟部申請 IP 白名單才能用，這台機器目前還沒申請，`apply_review.py` 審核時會清楚顯示「查證功能未開通」，不會誤判成「查無登記資料」。
 
 ### LINE 官方帳號身分綁定與用印回傳（`line_webhook`，已部署並實測通過）
 
-> **回傳用印檔的主要管道是網頁上傳**（店家在 `apply_status.html` 查到「合約已產生」後，直接在同一頁選檔案上傳，不需要再核對身分，見 `sdd5.md` §4.7.1）；下面的 LINE 綁定是選用的第二管道，頁面上收合在「也可以改用 LINE 傳回」。
+> **回傳用印檔的主要管道是網頁上傳**（店家在 `apply_status.html` 查到「同意書已產生」後，直接在同一頁選檔案上傳，不需要再核對身分，見 `sdd5.md` §4.7.1）；下面的 LINE 綁定是選用的第二管道，頁面上收合在「也可以改用 LINE 傳回」。
 
 店家核准後加入「花蓮職工福利行政小組」LINE 官方帳號，在聊天視窗輸入「申請編號 查詢碼」完成身分核對，之後直接在同一個對話傳回用印完成的掃描檔即可，不用寄 Email——詳見 `sdd5.md` §4.7、§4.8。
 
 ```powershell
-# 職工福利小組人工核對店家回傳的用印檔案，確認後標記完成
+# 職工福利小組人工核對店家回傳的同意書（商店印鑑、代表人簽章），確認後標記完成
 venv32\Scripts\python.exe store\apply_review.py --status merchant_signed
 
 # 把指定申請標記為放棄/不予受理
@@ -509,11 +509,11 @@ venv32\Scripts\python.exe store\apply_review.py --find 23456789
 | `bulletin/deploy_bulletin.py` | 匯出公告 JSON + 圖片，透過 SSH 金鑰部署到 Ubuntu 網站伺服器（見「功能五」） |
 | `sync_all.py` | 一次跑完 `store/sync_stores_to_firestore.py` + `bulletin/deploy_bulletin.py`，Lotus 資料更新後的日常同步用這支就好 |
 | `store/deploy_apply.py` | 部署 `store/web/apply.html`、`apply_status.html` 到 Ubuntu 網站伺服器（見「功能六」） |
-| `store/apply_review.py` | 互動式審核特約商店線上申請，含統一編號查證提示；`--status merchant_signed` 核對店家已回傳的用印檔案、`--abandon` 標記放棄、`--find` 用店名/統編/電話搜尋顯示申請編號與查詢碼（店家忘記時用） |
+| `store/apply_review.py` | 互動式審核特約商店線上申請，含統一編號查證提示；`--status merchant_signed` 核對店家已回傳的同意書、`--abandon` 標記放棄、`--find` 用店名/統編/電話搜尋顯示申請編號與查詢碼（店家忘記時用） |
 | `store/tax_id_lookup.py` | 共用模組：呼叫經濟部開放資料 API 查證統一編號是否真實存在 |
-| `store/prepare_contract_template.py` | 一次性把 `template-store.doc` 轉成含 `{{...}}` 佔位符的套版範本，範本改版才需要重跑 |
-| `store/preview_contract.py` | 用假資料快速套一次版並自動開啟 PDF，改範本後排版調整/確認用，不需要 Firebase/SSH 相關 `.env` 設定 |
-| `store/generate_contracts.py` | 把已核准（慈濟醫院合約範本）的申請套版產生 PDF，上傳到網站伺服器並回寫下載網址 |
+| `store/prepare_consent_template.py` | 一次性把 `template-consent.docx`（特約商店同意書原稿）轉成含 `{{...}}` 佔位符的套版範本 `templates/consent_template.docx`，同意書改版才需要重跑（純 Python 改 docx，不需要開 Word） |
+| `store/preview_contract.py` | 用假資料快速套一次同意書並自動開啟 PDF（`--until` 預覽「至指定日期止」），改範本後排版調整/確認用，不需要 Firebase/SSH 相關 `.env` 設定 |
+| `store/generate_contracts.py` | 把已核准的申請套版產生同意書 PDF，上傳到網站伺服器並回寫下載網址 |
 
 ---
 

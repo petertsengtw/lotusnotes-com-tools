@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,6 +18,7 @@ def _valid_fields(**overrides):
         "businessCategory": "餐飲",
         "discountContent": "消費滿百送飲料",
         "contractSource": applications.CONTRACT_SOURCE_HOSPITAL,
+        "validityType": applications.VALIDITY_OPEN_ENDED,
         "consentPersonalData": True,
     }
     data.update(overrides)
@@ -40,6 +42,37 @@ def test_validate_application_fields_rejects_bad_tax_id():
 
 def test_validate_application_fields_rejects_bad_contract_source():
     assert applications.validate_application_fields(_valid_fields(contractSource="other")) == "invalid_contract_source"
+
+
+TODAY = date(2026, 10, 14)
+
+
+def test_validate_application_fields_requires_validity_type_for_hospital_template():
+    assert applications.validate_application_fields(_valid_fields(validityType=None), TODAY) == "invalid_validity_type"
+    assert applications.validate_application_fields(_valid_fields(validityType="forever"), TODAY) == "invalid_validity_type"
+
+
+def test_validate_application_fields_until_date_needs_valid_future_date():
+    until = _valid_fields(validityType=applications.VALIDITY_UNTIL_DATE)
+    assert applications.validate_application_fields(until, TODAY) == "invalid_valid_until"
+    assert applications.validate_application_fields({**until, "validUntil": "2027/10/13"}, TODAY) == "invalid_valid_until"
+    assert applications.validate_application_fields({**until, "validUntil": "2027-02-30"}, TODAY) == "invalid_valid_until"
+    assert applications.validate_application_fields({**until, "validUntil": "2026-10-14"}, TODAY) == "valid_until_not_future"
+    assert applications.validate_application_fields({**until, "validUntil": "2027-10-13"}, TODAY) is None
+
+
+def test_validate_application_fields_own_template_skips_validity():
+    data = _valid_fields(contractSource=applications.CONTRACT_SOURCE_OWN, validityType=None)
+    assert applications.validate_application_fields(data, TODAY) is None
+
+
+def test_consent_period():
+    open_ended = {"validityType": applications.VALIDITY_OPEN_ENDED}
+    assert applications.consent_period(open_ended, TODAY) == ("2026-10-14", None)
+    until = {"validityType": applications.VALIDITY_UNTIL_DATE, "validUntil": "2027-10-13"}
+    assert applications.consent_period(until, TODAY) == ("2026-10-14", "2027-10-13")
+    # 改同意書之前送出的申請沒有 validityType，當長期有效
+    assert applications.consent_period({}, TODAY) == ("2026-10-14", None)
 
 
 def test_validate_application_fields_requires_explicit_consent():
@@ -123,3 +156,14 @@ def test_file_signature_rejects_spoofed_content_type():
     # 不在允許清單的類型一律不通過
     assert not applications.file_signature_matches("application/msword", b"\xd0\xcf\x11\xe0")
     assert not applications.file_signature_matches("application/pdf", b"")
+
+
+def test_is_consent():
+    hospital = applications.CONTRACT_SOURCE_HOSPITAL
+    assert applications.is_consent({"contractSource": hospital, "status": "contract_ready", "documentType": "consent"})
+    assert applications.is_consent({"contractSource": hospital, "status": "approved"})
+    assert applications.is_consent({"contractSource": hospital, "status": "pending"})
+    # 改制前已產生的合約
+    assert not applications.is_consent({"contractSource": hospital, "status": "contract_ready"})
+    assert not applications.is_consent({"contractSource": hospital, "status": "completed"})
+    assert not applications.is_consent({"contractSource": applications.CONTRACT_SOURCE_OWN, "status": "contract_ready"})

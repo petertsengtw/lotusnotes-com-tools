@@ -1,13 +1,16 @@
 """
-本機快速預覽合約套版效果（sdd5.md §4.5.1 排版調整/確認用）。
-用法: python preview_contract.py
+本機快速預覽同意書套版效果（sdd5.md §4.5.1 排版調整/確認用）。
 
 用假資料套一次版看排版對不對，不需要 Firebase／SSH 相關 .env 設定（那些是
 generate_contracts.py 正式套版+上傳才需要的，這裡只是要看 store/templates/
-contract_template.doc 套版後長怎樣）。想換測試資料的話，直接改下面
+consent_template.docx 套版後長怎樣）。想換測試資料的話，直接改下面
 SAMPLE_APPLICATION 這個字典就好，跑完會自動開啟產生的 PDF。
+
+用法: python preview_contract.py            # 長期有效
+      python preview_contract.py --until    # 至指定日期止
 """
 import os
+import sys
 
 # generate_contracts.py 一載入就會檢查 SSH/Firebase 相關的 .env 設定（因為它平常
 # 還要負責上傳、回寫進度），這裡只是想看排版用不到那些，先給假值騙過檢查即可。
@@ -32,8 +35,9 @@ SAMPLE_APPLICATION = {
     "taxId": "87654321",
     "contactPerson": "林小美",
     "phone": "03-8651234 / 0912-345678",
-    "contractStartDate": "2026-10-01",
-    "contractEndDate": "2027-09-30",
+    "email": "bakery.shoufeng@example.com",
+    "contractStartDate": "2026-10-14",
+    "contractEndDate": None,
 }
 
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "output", "preview_contract.pdf")
@@ -41,10 +45,13 @@ OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "output", "preview_contrac
 
 def main():
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    app = dict(SAMPLE_APPLICATION)
+    if "--until" in sys.argv[1:]:
+        app["contractEndDate"] = "2027-10-13"
     word = win32.gencache.EnsureDispatch("Word.Application")
     word.Visible = False
     try:
-        render_contract_pdf(word, SAMPLE_APPLICATION, OUTPUT_PATH)
+        render_contract_pdf(word, app, OUTPUT_PATH)
     finally:
         word.Quit()
 
